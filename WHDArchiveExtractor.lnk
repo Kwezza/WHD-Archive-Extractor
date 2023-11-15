@@ -1,0 +1,4 @@
+FROM LIB:c.o "WHDArchiveExtractor.o"
+TO "WHDArchiveExtractor"
+LIB LIB:sc.lib LIB:amiga.lib
+

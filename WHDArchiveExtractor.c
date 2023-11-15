@@ -35,7 +35,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <stdbool.h>
+//#include <stdbool.h>
+
+#define bool  int
+#define true  1
+#define false 0
 
 /*#define DEBUG*/
 
