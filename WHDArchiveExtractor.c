@@ -100,7 +100,7 @@ void fix_dos_formatting(char *str)
 
 char *remove_text(char *input_str, STRPTR text_to_remove)
 {
-    int input_len = strlen(input_str);
+    //int input_len = strlen(input_str);
     int remove_len = strlen(text_to_remove);
 
     /* Check if the second string exists at the start of the first string */
@@ -222,7 +222,7 @@ void get_directory_contents(STRPTR dir_path, STRPTR output_directory)
                                 archives_found++;
 
                                 /* Combine the extraction command, source path, and output path */
-                                snprintf(extraction_command, sizeof(extraction_command), "lha  -T x \"%s\" \"%s/%s\"", current_file_path, output_directory, get_file_path(remove_text(current_file_path, source_file_path)));
+                                sprintf(extraction_command, "lha  -T x \"%s\" \"%s/%s\"", current_file_path, output_directory, get_file_path(remove_text(current_file_path, source_file_path)));
                                 fix_dos_formatting(extraction_command);
                                 printf("%s\n", extraction_command);
                                 /* Execute the command */
@@ -250,7 +250,7 @@ void get_directory_contents(STRPTR dir_path, STRPTR output_directory)
 int main(int argc, char *argv[])
 {
 
-    int recurse, i;
+    //int recurse, i;
     long elapsed_seconds, hours, minutes, seconds;
 
     if (argc < 2)
