@@ -16,14 +16,13 @@
     extraction
   * Extracting only new or updated files to avoid unnecessary duplication
 
-  To use this program, ensure the LHA software is installed in the C: 
+  To use this program, ensure the LHA software is installed in the C:
   directory. You can download it from aminet.net/package/util/arc/lha.
 
   Created 02/04/2023 and compiled on the PC using VBCC.
   This program is released under the MIT License.
-  
-*/
 
+*/
 
 #include <ctype.h>
 #include <dos/dos.h>
@@ -35,20 +34,27 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-//#include <stdbool.h>
+// #include <stdbool.h>
 
-#define bool  int
-#define true  1
+#define bool int
+#define true 1
 #define false 0
+#define MAX_ERRORS 40
+#define MAX_ERROR_LENGTH 256
 
-/*#define DEBUG*/
+#define DEBUG
 
 long start_time;
 int archives_found;
 int num_dir_scanned;
-char version_number[] = "1.0.0";
+char version_number[] = "1.1.0";
 char *source_file_path;
 char *target_file_path;
+char errorMessages[MAX_ERRORS][MAX_ERROR_LENGTH];
+int errorCount = 0;
+bool skip_disk_space_check = false;
+char errorMessage[MAX_ERROR_LENGTH];
+int stop_app = 0; /* used to stop the app if the lha extraction fails */
 
 STRPTR dir_path;
 STRPTR output_directory;
@@ -58,7 +64,13 @@ char *remove_text(char *input_str, STRPTR text_to_remove);
 int ends_with_lha(const char *filename);
 char *get_file_path(const char *full_path);
 void get_directory_contents(STRPTR dir_path, STRPTR output_directory);
-int stop_app = 0; /* used to stop the app if the lha extraction fails */
+int does_file_exist(char *filename);
+int does_folder_exists(const char *folder_name);
+void remove_trailing_slash(char *str);
+void logError(const char *errorMessage);
+void printErrors(void);
+int check_disk_space(STRPTR path, int min_space_mb);
+
 
 /* Function to replace "//" with "/" and ":/" with ":" in input string */
 void fix_dos_formatting(char *str)
@@ -100,7 +112,7 @@ void fix_dos_formatting(char *str)
 
 char *remove_text(char *input_str, STRPTR text_to_remove)
 {
-    //int input_len = strlen(input_str);
+    // int input_len = strlen(input_str);
     int remove_len = strlen(text_to_remove);
 
     /* Check if the second string exists at the start of the first string */
@@ -179,9 +191,37 @@ int does_folder_exists(const char *folder_name)
     }
 }
 
-void remove_trailing_slash(char *str) {
-    if (str != NULL && strlen(str) > 0 && str[strlen(str) - 1] == '/') {
+void remove_trailing_slash(char *str)
+{
+    if (str != NULL && strlen(str) > 0 && str[strlen(str) - 1] == '/')
+    {
         str[strlen(str) - 1] = '\0';
+    }
+}
+
+void logError(const char *errorMessage)
+{
+
+    strncpy(errorMessages[errorCount], errorMessage, MAX_ERROR_LENGTH);
+    errorMessages[errorCount][MAX_ERROR_LENGTH - 1] = '\0'; // Ensure null-termination
+    errorCount++;
+}
+
+
+void printErrors()
+{
+    int i;
+    if (errorCount > 0)
+    {
+        printf("\nErrors encountered during execution:\n");
+        for (i = 0; i < errorCount; i++)
+        {
+            printf("Error %d: %s\n", i + 1, errorMessages[i]);
+        }
+    }
+    else
+    {
+        printf("\nNo errors encountered.\n");
     }
 }
 
@@ -201,7 +241,7 @@ void get_directory_contents(STRPTR dir_path, STRPTR output_directory)
         {
             if (Examine(dir_lock, file_info_block))
             {
-                while (ExNext(dir_lock, file_info_block) && stop_app ==0)
+                while (ExNext(dir_lock, file_info_block) && stop_app == 0)
                 {
                     if (strcmp(file_info_block->fib_FileName, ".") != 0 && strcmp(file_info_block->fib_FileName, "..") != 0)
                     {
@@ -219,25 +259,71 @@ void get_directory_contents(STRPTR dir_path, STRPTR output_directory)
                         {
                             if (ends_with_lha(file_info_block->fib_FileName))
                             {
-                                archives_found++;
 
-                                /* Combine the extraction command, source path, and output path */
-                                sprintf(extraction_command, "lha  -T x \"%s\" \"%s/%s\"", current_file_path, output_directory, get_file_path(remove_text(current_file_path, source_file_path)));
-                                fix_dos_formatting(extraction_command);
-                                printf("%s\n", extraction_command);
-                                /* Execute the command */
-                                command_result = SystemTagList(extraction_command, NULL);
-
-                                /* Check for error */
-                                if (command_result != 0)
+                                // Check for disk space before extracting
+                                if (!skip_disk_space_check)
                                 {
-                                    printf("\nError: Failed to execute command lha for file %s\nPlease check the archive is not damaged, and there is enough space in the\ntarget directory.  The program will now quit to prevent possible\nflood of popup messages.\n", current_file_path);
-                                    /* If the target directory is full, every single file lha attempts to extract will display a warning.  I've decided to stop the app here and allow it to exit gracefully.*/
-                                    stop_app =1;
+                                    int disk_check_result = check_disk_space(output_directory, 20);
+                                    if (disk_check_result < 0)
+                                    {
+                                        // To do: handle various error cases based on the result code
+                                        printf("Error: Not enough space on the target drive or cannot check space.\n20MB miniumum checked for.  To disable this check, launch the program\nwith the '-skipdiskcheck' command.\n");
+                                        stop_app = 1;
+                                    }
+                                    else
+                                    {
+                                        archives_found++;
+
+                                        /* Combine the extraction command, source path, and output path */
+                                        sprintf(extraction_command, "lha  -T x \"%s\" \"%s/%s\"", current_file_path, output_directory, get_file_path(remove_text(current_file_path, source_file_path)));
+                                        fix_dos_formatting(extraction_command);
+                                        printf("%s\n", extraction_command);
+                                        /* Execute the command */
+                                        command_result = SystemTagList(extraction_command, NULL);
+
+                                        /* Check for error */
+
+                                        if (command_result != 0)
+                                        {
+                                            if (command_result == 10)
+                                            {
+                                                printf("\nError: Corrupt archive %s\n", current_file_path);
+                                                // Copy the first part of the message
+                                                strncpy(errorMessage, current_file_path, MAX_ERROR_LENGTH - 1);
+                                                errorMessage[MAX_ERROR_LENGTH - 1] = '\0'; // Ensure null-termination
+
+                                                // Concatenate the error message if there's space
+                                                if (strlen(errorMessage) + strlen(" is corrupt") < MAX_ERROR_LENGTH)
+                                                {
+                                                    strcat(errorMessage, " is corrupt");
+                                                }
+                                                logError(errorMessage);
+                                            }
+                                            else
+                                            {
+                                                printf("\nError: Failed to execute command lha for file %s\nPlease check the archive is not damaged, and there is enough space in the\ntarget directory.  The program will now quit to prevent possible\nflood of popup messages.\n", current_file_path);
+                                                // Copy the first part of the message
+                                                strncpy(errorMessage, current_file_path, MAX_ERROR_LENGTH - 1);
+                                                errorMessage[MAX_ERROR_LENGTH - 1] = '\0'; // Ensure null-termination
+
+                                                // Concatenate the error message if there's space
+                                                if (strlen(errorMessage) + strlen(" failed to extract. Unknown error") < MAX_ERROR_LENGTH)
+                                                {
+                                                    strcat(errorMessage, " failed to extract. Unknown error");
+                                                }
+                                                logError(errorMessage);
+                                            }
+                                        }
+                                        // if the number of errors is greater then MAX_ERRORS, then quit
+                                        if (errorCount >= MAX_ERRORS)
+                                        {
+                                            printf("Maximum number of errors reached. Aborting.\n");
+                                            stop_app = 1;
+                                        }
+                                    }
                                 }
                             }
                         }
-
                     }
                 }
             }
@@ -247,11 +333,52 @@ void get_directory_contents(STRPTR dir_path, STRPTR output_directory)
     }
 }
 
+int check_disk_space(STRPTR path, int min_space_mb)
+{
+    struct InfoData *info = AllocMem(sizeof(struct InfoData), MEMF_CLEAR);
+    BPTR lock = Lock(path, ACCESS_READ);
+    long free_space;
+    int result; 
+
+    if (!info)
+        return -1; // Allocation failed, can't check disk space
+
+
+    
+    if (!lock)
+    {
+        FreeMem(info, sizeof(struct InfoData));
+        return -2; // Unable to lock the path, can't check disk space
+    }
+
+    result = 0; // Default to 0, meaning there's enough space
+
+    if (Info(lock, info))
+    {
+        // Convert available blocks to bytes and then to megabytes
+        free_space = ((long )info->id_NumBlocks - (long )info->id_NumBlocksUsed) * (long )info->id_BytesPerBlock / 1024 / 1024;
+        if (free_space < min_space_mb)
+        {
+            result = -3; // Not enough space
+        }
+    }
+    else
+    {
+        result = -4; // Info call failed
+    }
+
+    UnLock(lock);
+    FreeMem(info, sizeof(struct InfoData));
+    return result;
+}
+
 int main(int argc, char *argv[])
 {
 
-    //int recurse, i;
+    int  i, disk_check_result;
     long elapsed_seconds, hours, minutes, seconds;
+
+    printf("\n");
 
     if (argc < 2)
     {
@@ -268,31 +395,52 @@ int main(int argc, char *argv[])
     dir_path = argv[1];
 
     output_directory = argv[2];
-
 #ifdef DEBUG
     dir_path = "PC0:WHDLoad/Beta";
-    output_directory = "DH0:WHDLoad/Beta";
+    output_directory = "DH1:";
 #endif
+    for (i = 3; i < argc; i++)
+    {
+        if (strcmp(argv[i], "-skipdiskcheck") == 0)
+        {
+            skip_disk_space_check = true;
+        }
+    }
+
+
+
 
     remove_trailing_slash(dir_path);
     remove_trailing_slash(output_directory);
 
     source_file_path = dir_path;
 
-    if (!does_folder_exists(dir_path))
-    {
-        printf("Unable to find the source folder %s.\n", dir_path);
-        return 0;
-    }
-    if (!does_folder_exists(output_directory))
-    {
-        printf("Unable to find the target folder %s.\n", output_directory);
-        return 0;
-    }    
 
     printf("Scanning directory: %s\n", dir_path);
     printf("Extracting archives to: %s\n", output_directory);
 
+    if (does_folder_exists(dir_path)==0)
+    {
+        printf("\nUnable to find the source folder %s\n\n", dir_path);
+        return 0;
+    }
+    if (does_folder_exists(output_directory)==0)
+    {
+        printf("\nUnable to find the target folder %s\n\n", output_directory);
+        return 0;
+    }
+
+
+    if (!skip_disk_space_check)
+    {
+        disk_check_result = check_disk_space(output_directory, 20);
+        if (disk_check_result < 0)
+        {
+            // To do: handle various error cases based on the result code
+            printf("\nError: Not enough space on the target drive or cannot check space.\n20MB miniumum checked for.  To disable this check, launch the\nprogram with the '-skipdiskcheck' command.\n");
+            return 0;
+        }
+    }
     /* Start timer */
     start_time = time(NULL);
 
@@ -305,6 +453,7 @@ int main(int argc, char *argv[])
     seconds = elapsed_seconds % 60;
     printf("Scanned %d directories and found %d archives\n", num_dir_scanned, archives_found);
     printf("Elapsed time: %ld:%02ld:%02ld\n", hours, minutes, seconds);
+    printErrors();
     printf("\nWHDArchiveExtractor V%s\n", version_number);
     return 0;
 }
