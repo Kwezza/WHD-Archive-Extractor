@@ -1,5 +1,5 @@
 
-;SAS/C Amiga Compiler (Phase 1)  6.50                Nov 16 2023 16:04:49                                                                            Page 1
+;SAS/C Amiga Compiler (Phase 1)  6.50                Nov 20 2023 15:53:44                                                                            Page 1
 
 
 ;===> Including file "include:ctype.h"
@@ -52,61 +52,58 @@
 ;===> Including file "include:sys/commnull.h"
 ;===> Including file "include:sys/commsize.h"
 ;===> Including file "include:sys/commtime.h"
-6.50 (Cross Reference)        Nov 16 2023 16:04:49                         Page 1
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 1
 
 
       SYMBOL        ATTRIBUTES AND CROSS REFERENCE
 
 
-__builtin_strcmp near function returning int
-                 WHDArchiveExtractor.c: 404
-
 __builtin_printf near __stdargs function returning int
-                 WHDArchiveExtractor.c: 216, 219, 224, 270, 280, 290, 304, 320,
-                             381, 385, 391, 419, 420, 424, 429, 440, 454, 455,
-                             457
+                 WHDArchiveExtractor.c: 221, 224, 229, 272, 276, 286, 296, 310,
+                             326, 365, 494, 495, 497, 501, 507, 534, 535, 539,
+                             544, 554, 556, 570, 571, 573
 
 __builtin_strlen near function returning "size_t"
-                 WHDArchiveExtractor.c: 116, 131, 196(2), 198, 296(2), 310(2)
+                 WHDArchiveExtractor.c: 121, 136, 201(2), 203, 302(2), 316(2)
 
 __builtin_strcmp near function returning int
-                 WHDArchiveExtractor.c: 132, 246(2)
+                 WHDArchiveExtractor.c: 137, 251(2), 520
 
 __builtin_strcpy near function returning pointer to char
-                 WHDArchiveExtractor.c: 248
+                 WHDArchiveExtractor.c: 253
 
 archives_found   int
-                 WHDArchiveExtractor.c: 48, 275, 454
+                 WHDArchiveExtractor.c: 48, 281, 570
 
 argc             int
-                 WHDArchiveExtractor.c: 375, 383, 402
+                 WHDArchiveExtractor.c: 473, 499, 518
 
 argv             pointer to pointer to char
-                 WHDArchiveExtractor.c: 375, 395, 397, 404
+                 WHDArchiveExtractor.c: 473, 511, 513, 520
 
 ACCESS_READ      #define symbol
-                 WHDArchiveExtractor.c: 182, 236, 339
+                 WHDArchiveExtractor.c: 187, 241, 345
 
 AllocMem         near function returning "APTR"
-                 WHDArchiveExtractor.c: 239, 338
+                 WHDArchiveExtractor.c: 244, 344
 
 bool             #define symbol
                  WHDArchiveExtractor.c: 39, 55
 
 BPTR             long
-                 WHDArchiveExtractor.c: 182, 231, 339
+                 WHDArchiveExtractor.c: 187, 236, 345
 
 check_disk_space near function returning int
-                 WHDArchiveExtractor.c: 72, 266, 336, 436
+                 WHDArchiveExtractor.c: 73, 271, 342, 551
 
 command_result   "LONG"
-                 WHDArchiveExtractor.c: 234, 282, 286, 288
+                 WHDArchiveExtractor.c: 239, 288, 292, 294
 
 current_file_path array [256] of char
-                 WHDArchiveExtractor.c: 232, 248, 249, 250, 256, 278(2), 290,
-                             292, 304, 306
+                 WHDArchiveExtractor.c: 237, 253, 254, 255, 261, 284(2), 296,
+                             298, 310, 312
 
-6.50 (Cross Reference)        Nov 16 2023 16:04:49                         Page 2
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 2
 
 
       SYMBOL        ATTRIBUTES AND CROSS REFERENCE
@@ -114,53 +111,53 @@ current_file_path array [256] of char
 
 
 CONST_STRPTR     pointer to const unsigned char
-                 WHDArchiveExtractor.c: 182, 236
+                 WHDArchiveExtractor.c: 187, 241
 
 dir_path         "STRPTR"
-                 WHDArchiveExtractor.c: 59, 66, 228, 395, 399, 413, 416, 419,
-                             422, 424, 447
+                 WHDArchiveExtractor.c: 59, 67, 233, 511, 515, 529, 532, 534,
+                             537, 539, 563
 
 dir_lock         "BPTR"
-                 WHDArchiveExtractor.c: 231, 236, 237, 242, 244, 332
+                 WHDArchiveExtractor.c: 236, 241, 242, 247, 249, 338
 
 dir_path         pointer to unsigned char
-                 WHDArchiveExtractor.c: 236, 248
+                 WHDArchiveExtractor.c: 241, 253
 
 disk_check_result int
-                 WHDArchiveExtractor.c: 437
+                 WHDArchiveExtractor.c: 552, 554
 
 disk_check_result int
-                 WHDArchiveExtractor.c: 266, 267
+                 WHDArchiveExtractor.c: 271, 272, 273
 
 disk_check_result int
-                 WHDArchiveExtractor.c: 378, 436
+                 WHDArchiveExtractor.c: 476, 551
 
 does_folder_exists near function returning int
-                 WHDArchiveExtractor.c: 422, 427
+                 WHDArchiveExtractor.c: 537, 542
 
 does_file_exist near function returning int
-                 WHDArchiveExtractor.c: 67, 163, 389
+                 WHDArchiveExtractor.c: 68, 168, 505
 
 does_folder_exists near function returning int
-                 WHDArchiveExtractor.c: 68, 180
+                 WHDArchiveExtractor.c: 69, 185
 
 DEBUG            #define symbol
-                 WHDArchiveExtractor.c: 45, 398
+                 WHDArchiveExtractor.c: 45, 364, 514
 
 DOSBase          pointer to struct "DosLibrary"
-                 WHDArchiveExtractor.c: 182, 185, 236, 242, 244, 282, 332, 339,
-                             356, 370
+                 WHDArchiveExtractor.c: 187, 190, 241, 247, 249, 288, 338, 345,
+                             359, 382
 
 elapsed_seconds long
-                 WHDArchiveExtractor.c: 379, 450, 451, 452, 453
+                 WHDArchiveExtractor.c: 477, 566, 567, 568, 569
 
 ends_with_lha    near function returning int
-                 WHDArchiveExtractor.c: 64, 129, 260
+                 WHDArchiveExtractor.c: 65, 134, 265
 
 errorMessages    array [40] of array [256] of char
-                 WHDArchiveExtractor.c: 53, 205, 206, 219
+                 WHDArchiveExtractor.c: 53, 210, 211, 224
 
-6.50 (Cross Reference)        Nov 16 2023 16:04:49                         Page 3
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 3
 
 
       SYMBOL        ATTRIBUTES AND CROSS REFERENCE
@@ -168,53 +165,53 @@ errorMessages    array [40] of array [256] of char
 
 
 errorCount       int
-                 WHDArchiveExtractor.c: 54, 205, 206, 207, 214, 217, 318
+                 WHDArchiveExtractor.c: 54, 210, 211, 212, 219, 222, 324
 
 errorMessage     array [256] of char
-                 WHDArchiveExtractor.c: 56, 70, 202, 292, 293, 296, 298, 300,
-                             306, 307, 310, 312, 314
+                 WHDArchiveExtractor.c: 56, 71, 207, 298, 299, 302, 304, 306,
+                             312, 313, 316, 318, 320
 
 errorMessage     pointer to const char
-                 WHDArchiveExtractor.c: 205
+                 WHDArchiveExtractor.c: 210
 
 extraction_command array [256] of char
-                 WHDArchiveExtractor.c: 233, 278, 279, 280, 282
+                 WHDArchiveExtractor.c: 238, 284, 285, 286, 288
 
 ExNext           near function returning "LONG"
-                 WHDArchiveExtractor.c: 244
+                 WHDArchiveExtractor.c: 249
 
 Examine          near function returning "LONG"
-                 WHDArchiveExtractor.c: 242
+                 WHDArchiveExtractor.c: 247
 
 false            #define symbol
                  WHDArchiveExtractor.c: 41, 55
 
 fclose           near function returning int
-                 WHDArchiveExtractor.c: 170
+                 WHDArchiveExtractor.c: 175
 
 fib_DirEntryType long in enum <no tag> (offset: 4)
-                 WHDArchiveExtractor.c: 252
+                 WHDArchiveExtractor.c: 257
 
 fib_FileName     array [108] of unsigned char in struct "FileInfoBlock" (offset:
                  8)
-                 WHDArchiveExtractor.c: 246(2), 250, 260
+                 WHDArchiveExtractor.c: 251(2), 255, 265
 
 file             pointer to struct "__iobuf"
-                 WHDArchiveExtractor.c: 167, 170
+                 WHDArchiveExtractor.c: 172, 175
 
 filename         pointer to const char
-                 WHDArchiveExtractor.c: 64
+                 WHDArchiveExtractor.c: 65
 
 filename         pointer to char
-                 WHDArchiveExtractor.c: 67
+                 WHDArchiveExtractor.c: 68
 
 filename         pointer to const char
-                 WHDArchiveExtractor.c: 129, 131, 132
+                 WHDArchiveExtractor.c: 134, 136, 137
 
 file_path        pointer to char
-                 WHDArchiveExtractor.c: 137, 150, 152, 155, 156, 160
+                 WHDArchiveExtractor.c: 142, 155, 157, 160, 161, 165
 
-6.50 (Cross Reference)        Nov 16 2023 16:04:49                         Page 4
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 4
 
 
       SYMBOL        ATTRIBUTES AND CROSS REFERENCE
@@ -222,44 +219,47 @@ file_path        pointer to char
 
 
 file_path_length "size_t"
-                 WHDArchiveExtractor.c: 147, 150, 155, 156
+                 WHDArchiveExtractor.c: 152, 155, 160, 161
 
 filename         pointer to char
-                 WHDArchiveExtractor.c: 163, 167
+                 WHDArchiveExtractor.c: 168, 172
 
 file             pointer to "FILE"
-                 WHDArchiveExtractor.c: 165
+                 WHDArchiveExtractor.c: 170
 
 file_info_block pointer to struct "FileInfoBlock"
-                 WHDArchiveExtractor.c: 230, 239, 240, 242, 244, 246(2), 250,
-                             252, 260, 330
+                 WHDArchiveExtractor.c: 235, 244, 245, 247, 249, 251(2), 255,
+                             257, 265, 336
 
 fix_dos_formatting near function returning void
-                 WHDArchiveExtractor.c: 62, 76, 279
+                 WHDArchiveExtractor.c: 63, 81, 285
 
 folder_name      pointer to const char
-                 WHDArchiveExtractor.c: 68
+                 WHDArchiveExtractor.c: 69
 
 folder_name      pointer to const char
-                 WHDArchiveExtractor.c: 180, 182
+                 WHDArchiveExtractor.c: 185, 187
 
 fopen            near function returning pointer to "FILE"
-                 WHDArchiveExtractor.c: 167
+                 WHDArchiveExtractor.c: 172
 
 free_space       long
-                 WHDArchiveExtractor.c: 340, 359, 360
+                 WHDArchiveExtractor.c: 368, 372
+
+free_space       long
+                 WHDArchiveExtractor.c: 346, 362, 365
 
 full_path        pointer to const char
-                 WHDArchiveExtractor.c: 65
+                 WHDArchiveExtractor.c: 66
 
 full_path        pointer to const char
-                 WHDArchiveExtractor.c: 135, 140, 141, 147, 155
+                 WHDArchiveExtractor.c: 140, 145, 146, 152, 160
 
 FILE             struct "__iobuf" (size 33 bytes)
-                 WHDArchiveExtractor.c: 165
+                 WHDArchiveExtractor.c: 170
 
 FileInfoBlock    struct tag (size 260 bytes)
-                 WHDArchiveExtractor.c: 230, 239(2), 330
+                 WHDArchiveExtractor.c: 235, 244(2), 336
                  members:
                    fib_DiskKey (offset: 0)
                    fib_DirEntryType (offset: 4)
@@ -267,122 +267,119 @@ FileInfoBlock    struct tag (size 260 bytes)
                    fib_Protection (offset: 116)
                    fib_EntryType (offset: 120)
                    fib_Size (offset: 124)
-                   fib_NumBlocks (offset: 128)
-                   fib_Date (offset: 132)
-                   fib_Comment (offset: 144)
-6.50 (Cross Reference)        Nov 16 2023 16:04:49                         Page 5
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 5
 
 
       SYMBOL        ATTRIBUTES AND CROSS REFERENCE
 
 
 
+                   fib_NumBlocks (offset: 128)
+                   fib_Date (offset: 132)
+                   fib_Comment (offset: 144)
                    fib_OwnerUID (offset: 224)
                    fib_OwnerGID (offset: 226)
                    fib_Reserved (offset: 228)
 
 FreeMem          near function returning void
-                 WHDArchiveExtractor.c: 330, 350, 371
+                 WHDArchiveExtractor.c: 336, 353, 383
 
 get_file_path    near function returning pointer to char
-                 WHDArchiveExtractor.c: 65, 135, 278
+                 WHDArchiveExtractor.c: 66, 140, 284
 
 get_directory_contents near function returning void
-                 WHDArchiveExtractor.c: 66, 228, 256, 447
+                 WHDArchiveExtractor.c: 67, 233, 261, 563
 
 hours            long
-                 WHDArchiveExtractor.c: 379, 451, 455
+                 WHDArchiveExtractor.c: 477, 567, 571
 
 i                int
-                 WHDArchiveExtractor.c: 213, 217(3), 219(2)
+                 WHDArchiveExtractor.c: 218, 222(3), 224(2)
 
 i                int
-                 WHDArchiveExtractor.c: 378, 402(3), 404
+                 WHDArchiveExtractor.c: 476, 518(3), 520
 
 id_BytesPerBlock long in struct "InfoData" (offset: 20)
-                 WHDArchiveExtractor.c: 359
+                 WHDArchiveExtractor.c: 362
 
 id_NumBlocks     long in struct "InfoData" (offset: 12)
-                 WHDArchiveExtractor.c: 359
+                 WHDArchiveExtractor.c: 362
 
 id_NumBlocksUsed long in struct "InfoData" (offset: 16)
-                 WHDArchiveExtractor.c: 359
+                 WHDArchiveExtractor.c: 362
 
 info             pointer to struct "InfoData"
-                 WHDArchiveExtractor.c: 338, 343, 350, 356, 359(3), 371
+                 WHDArchiveExtractor.c: 344, 349, 353, 359, 362(3), 383
 
 input_str        pointer to char
-                 WHDArchiveExtractor.c: 63
+                 WHDArchiveExtractor.c: 64
 
 input_str        pointer to char
-                 WHDArchiveExtractor.c: 113, 119, 122, 126
+                 WHDArchiveExtractor.c: 118, 124, 127, 131
 
 InfoData         struct tag (size 36 bytes)
-                 WHDArchiveExtractor.c: 338(2), 350, 371
+                 WHDArchiveExtractor.c: 344(2), 353, 383
                  members:
                    id_NumSoftErrors (offset: 0)
                    id_UnitNumber (offset: 4)
                    id_DiskState (offset: 8)
-                   id_NumBlocks (offset: 12)
-                   id_NumBlocksUsed (offset: 16)
-                   id_BytesPerBlock (offset: 20)
-6.50 (Cross Reference)        Nov 16 2023 16:04:49                         Page 6
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 6
 
 
       SYMBOL        ATTRIBUTES AND CROSS REFERENCE
 
 
 
+                   id_NumBlocks (offset: 12)
+                   id_NumBlocksUsed (offset: 16)
+                   id_BytesPerBlock (offset: 20)
                    id_DiskType (offset: 24)
                    id_VolumeNode (offset: 28)
                    id_InUse (offset: 32)
 
 Info             near function returning "LONG"
-                 WHDArchiveExtractor.c: 356
+                 WHDArchiveExtractor.c: 359
 
 last_slash       pointer to const char
-                 WHDArchiveExtractor.c: 140, 142(2)
+                 WHDArchiveExtractor.c: 145, 147(2)
 
 last_back_slash pointer to const char
-                 WHDArchiveExtractor.c: 141, 142(2)
+                 WHDArchiveExtractor.c: 146, 147(2)
 
 last_path_separator pointer to const char
-                 WHDArchiveExtractor.c: 142, 144, 147
+                 WHDArchiveExtractor.c: 147, 149, 152
 
 len              "size_t"
-                 WHDArchiveExtractor.c: 131, 132(2)
+                 WHDArchiveExtractor.c: 136, 137(2)
 
 lock             long
-                 WHDArchiveExtractor.c: 348, 356, 370
+                 WHDArchiveExtractor.c: 351, 359, 382
 
 lock             long
-                 WHDArchiveExtractor.c: 183, 185
+                 WHDArchiveExtractor.c: 188, 190
 
 lock             "BPTR"
-                 WHDArchiveExtractor.c: 182
+                 WHDArchiveExtractor.c: 187
 
 lock             "BPTR"
-                 WHDArchiveExtractor.c: 339
+                 WHDArchiveExtractor.c: 345
 
 logError         near function returning void
-                 WHDArchiveExtractor.c: 70, 202, 300, 314
+                 WHDArchiveExtractor.c: 71, 207, 306, 320
 
 LONG             long
-                 WHDArchiveExtractor.c: 234
+                 WHDArchiveExtractor.c: 239
 
 Lock             near function returning "BPTR"
-                 WHDArchiveExtractor.c: 182, 236, 339
+                 WHDArchiveExtractor.c: 187, 241, 345
 
 main             near function returning int
-                 WHDArchiveExtractor.c: 375
+                 WHDArchiveExtractor.c: 473
 
 malloc           near function returning pointer to void
-                 WHDArchiveExtractor.c: 150
+                 WHDArchiveExtractor.c: 155
 
-min_space_mb     int
-                 WHDArchiveExtractor.c: 72
-
-6.50 (Cross Reference)        Nov 16 2023 16:04:49                         Page 7
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 7
 
 
       SYMBOL        ATTRIBUTES AND CROSS REFERENCE
@@ -390,158 +387,168 @@ min_space_mb     int
 
 
 min_space_mb     int
-                 WHDArchiveExtractor.c: 336, 360
+                 WHDArchiveExtractor.c: 73
+
+min_space_mb     int
+                 WHDArchiveExtractor.c: 342, 372
 
 minutes          long
-                 WHDArchiveExtractor.c: 379, 452, 455
+                 WHDArchiveExtractor.c: 477, 568, 571
 
 MAX_ERRORS       #define symbol
-                 WHDArchiveExtractor.c: 42, 53, 318
+                 WHDArchiveExtractor.c: 42, 53, 324
 
 MAX_ERROR_LENGTH #define symbol
-                 WHDArchiveExtractor.c: 43, 53, 56, 205, 206, 292, 293, 296, 306,
-                             307, 310
+                 WHDArchiveExtractor.c: 43, 53, 56, 210, 211, 298, 299, 302, 312,
+                             313, 316
 
 MEMF_CLEAR       #define symbol
-                 WHDArchiveExtractor.c: 239, 338
+                 WHDArchiveExtractor.c: 244, 344
 
 num_dir_scanned int
-                 WHDArchiveExtractor.c: 49, 254, 454
+                 WHDArchiveExtractor.c: 49, 259, 570
 
 NULL             #define symbol
-                 WHDArchiveExtractor.c: 137, 144, 152, 196, 282, 445, 450
+                 WHDArchiveExtractor.c: 142, 149, 157, 201, 288, 561, 566
 
 output_directory "STRPTR"
-                 WHDArchiveExtractor.c: 60, 66, 228, 397, 400, 414, 420, 427,
-                             429, 436, 447
+                 WHDArchiveExtractor.c: 60, 67, 233, 513, 516, 530, 535, 542,
+                             544, 551, 563
 
 output_directory pointer to unsigned char
-                 WHDArchiveExtractor.c: 256, 266, 278
+                 WHDArchiveExtractor.c: 261, 271, 284
 
 p                pointer to char
-                 WHDArchiveExtractor.c: 79, 83, 85(2), 88, 90(2), 94, 96(2), 100,
-                             105, 106
+                 WHDArchiveExtractor.c: 84, 88, 90(2), 93, 95(2), 99, 101(2),
+                             105, 110, 111
 
 path             "STRPTR"
-                 WHDArchiveExtractor.c: 336, 339
+                 WHDArchiveExtractor.c: 342, 345
 
 path             "STRPTR"
-                 WHDArchiveExtractor.c: 72
+                 WHDArchiveExtractor.c: 73
 
 printf           #define symbol
-                 WHDArchiveExtractor.c: 216, 219, 224, 270, 280, 290, 304, 320,
-                             381, 385, 391, 419, 420, 424, 429, 440, 454, 455,
-                             457
+                 WHDArchiveExtractor.c: 221, 224, 229, 272, 276, 286, 296, 310,
+                             326, 365, 494, 495, 497, 501, 507, 534, 535, 539,
+                             544, 554, 556, 570, 571, 573
+
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 8
+
+
+      SYMBOL        ATTRIBUTES AND CROSS REFERENCE
+
+
 
 printErrors      near function returning void
-                 WHDArchiveExtractor.c: 71, 202, 456
-
-6.50 (Cross Reference)        Nov 16 2023 16:04:49                         Page 8
-
-
-      SYMBOL        ATTRIBUTES AND CROSS REFERENCE
-
-
+                 WHDArchiveExtractor.c: 72, 207, 572
 
 q                pointer to char
-                 WHDArchiveExtractor.c: 80, 93, 99, 105, 108, 110
+                 WHDArchiveExtractor.c: 85, 98, 104, 110, 113, 115
 
 remove_text      near function returning pointer to char
-                 WHDArchiveExtractor.c: 63, 113, 278
+                 WHDArchiveExtractor.c: 64, 118, 284
 
 remove_trailing_slash near function returning void
-                 WHDArchiveExtractor.c: 69, 194, 413, 414
+                 WHDArchiveExtractor.c: 70, 199, 529, 530
 
 remove_len       int
-                 WHDArchiveExtractor.c: 116, 119, 122
+                 WHDArchiveExtractor.c: 121, 124, 127
 
 result           int
-                 WHDArchiveExtractor.c: 341, 354, 362, 367, 372
+                 WHDArchiveExtractor.c: 347, 357, 370, 374, 379, 384
 
 seconds          long
-                 WHDArchiveExtractor.c: 379, 453, 455
+                 WHDArchiveExtractor.c: 477, 569, 571
 
 size_t           unsigned int
-                 WHDArchiveExtractor.c: 131, 147
+                 WHDArchiveExtractor.c: 136, 152
 
 skip_disk_space_check int
-                 WHDArchiveExtractor.c: 55, 264, 406, 434
+                 WHDArchiveExtractor.c: 55, 269, 522, 549
 
 source_file_path pointer to char
-                 WHDArchiveExtractor.c: 51, 278, 416
+                 WHDArchiveExtractor.c: 51, 284, 532
 
 sprintf          near __stdargs function returning int
-                 WHDArchiveExtractor.c: 278
+                 WHDArchiveExtractor.c: 284
 
 start_time       long
-                 WHDArchiveExtractor.c: 47, 445, 450
+                 WHDArchiveExtractor.c: 47, 561, 566
 
 stop_app         int
-                 WHDArchiveExtractor.c: 57, 244, 271, 321
+                 WHDArchiveExtractor.c: 57, 249, 277, 327
 
 str              pointer to char
-                 WHDArchiveExtractor.c: 62
+                 WHDArchiveExtractor.c: 63
 
 str              pointer to char
-                 WHDArchiveExtractor.c: 69
+                 WHDArchiveExtractor.c: 70
 
 str              pointer to char
-                 WHDArchiveExtractor.c: 76, 79, 80, 85
+                 WHDArchiveExtractor.c: 81, 84, 85, 90
 
-str              pointer to char
-                 WHDArchiveExtractor.c: 194, 196(4), 198(2)
-
-6.50 (Cross Reference)        Nov 16 2023 16:04:49                         Page 9
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 9
 
 
       SYMBOL        ATTRIBUTES AND CROSS REFERENCE
 
 
 
+str              pointer to char
+                 WHDArchiveExtractor.c: 199, 201(4), 203(2)
+
 strcat           near function returning pointer to char
-                 WHDArchiveExtractor.c: 249, 250, 298, 312
+                 WHDArchiveExtractor.c: 254, 255, 304, 318
 
 strcmp           #define symbol  (2 arguments)
-                 WHDArchiveExtractor.c: 132, 246(2), 404
+                 WHDArchiveExtractor.c: 137, 251(2), 520
 
 strcpy           #define symbol  (2 arguments)
-                 WHDArchiveExtractor.c: 248
+                 WHDArchiveExtractor.c: 253
 
 strlen           #define symbol  (1 argument)
-                 WHDArchiveExtractor.c: 116, 131, 196(2), 198, 296(2), 310(2)
+                 WHDArchiveExtractor.c: 121, 136, 201(2), 203, 302(2), 316(2)
 
 strncpy          near function returning pointer to char
-                 WHDArchiveExtractor.c: 155, 205, 292, 306
+                 WHDArchiveExtractor.c: 160, 210, 298, 312
 
 strncmp          near function returning int
-                 WHDArchiveExtractor.c: 119
+                 WHDArchiveExtractor.c: 124
 
 strrchr          near function returning pointer to char
-                 WHDArchiveExtractor.c: 140, 141
+                 WHDArchiveExtractor.c: 145, 146
 
 STRPTR           pointer to unsigned char
-                 WHDArchiveExtractor.c: 59, 60, 63, 66(2), 72, 113, 228(2), 336
+                 WHDArchiveExtractor.c: 59, 60, 64, 67(2), 73, 118, 233(2), 342
 
 SystemTagList    near function returning "LONG"
-                 WHDArchiveExtractor.c: 282
+                 WHDArchiveExtractor.c: 288
 
 target_file_path pointer to char
                  WHDArchiveExtractor.c: 52
 
 text_to_remove   "STRPTR"
-                 WHDArchiveExtractor.c: 63
+                 WHDArchiveExtractor.c: 64
 
 text_to_remove   "STRPTR"
-                 WHDArchiveExtractor.c: 113, 116, 119
+                 WHDArchiveExtractor.c: 118, 121, 124
 
 time             near function returning "time_t"
-                 WHDArchiveExtractor.c: 445, 450
+                 WHDArchiveExtractor.c: 561, 566
 
 true             #define symbol
-                 WHDArchiveExtractor.c: 40, 406
+                 WHDArchiveExtractor.c: 40, 522
 
 UnLock           near function returning void
-                 WHDArchiveExtractor.c: 185, 332, 370
+                 WHDArchiveExtractor.c: 190, 338, 382
+
+6.50 (Cross Reference)        Nov 20 2023 15:53:44                         Page 10
+
+
+      SYMBOL        ATTRIBUTES AND CROSS REFERENCE
+
+
 
 version_number   array [6] of char
-                 WHDArchiveExtractor.c: 50, 385, 457
+                 WHDArchiveExtractor.c: 50, 495, 573

@@ -59,6 +59,7 @@ int stop_app = 0; /* used to stop the app if the lha extraction fails */
 STRPTR dir_path;
 STRPTR output_directory;
 
+// Function prototypes 
 void fix_dos_formatting(char *str);
 char *remove_text(char *input_str, STRPTR text_to_remove);
 int ends_with_lha(const char *filename);
@@ -70,6 +71,10 @@ void remove_trailing_slash(char *str);
 void logError(const char *errorMessage);
 void printErrors(void);
 int check_disk_space(STRPTR path, int min_space_mb);
+
+
+// testing prototypes
+
 
 
 /* Function to replace "//" with "/" and ":/" with ":" in input string */
@@ -213,10 +218,10 @@ void printErrors()
     int i;
     if (errorCount > 0)
     {
-        printf("\nErrors encountered during execution:\n");
+        printf("\n\x1B[1mErrors encountered during execution:\x1B[0m\n");
         for (i = 0; i < errorCount; i++)
         {
-            printf("Error %d: %s\n", i + 1, errorMessages[i]);
+            printf("\x1B[1mError:\x1B[0m %d: %s\n", i + 1, errorMessages[i]);
         }
     }
     else
@@ -264,10 +269,11 @@ void get_directory_contents(STRPTR dir_path, STRPTR output_directory)
                                 if (!skip_disk_space_check)
                                 {
                                     int disk_check_result = check_disk_space(output_directory, 20);
+                                    printf("Disk check result: %d\n", disk_check_result);
                                     if (disk_check_result < 0)
                                     {
                                         // To do: handle various error cases based on the result code
-                                        printf("Error: Not enough space on the target drive or cannot check space.\n20MB miniumum checked for.  To disable this check, launch the program\nwith the '-skipdiskcheck' command.\n");
+                                        printf("\x1B[1mError:\x1B[0m Not enough space on the target drive or cannot check space.\n20MB miniumum checked for.  To disable this check, launch the program\nwith the '-skipdiskcheck' command.\n");
                                         stop_app = 1;
                                     }
                                     else
@@ -287,7 +293,7 @@ void get_directory_contents(STRPTR dir_path, STRPTR output_directory)
                                         {
                                             if (command_result == 10)
                                             {
-                                                printf("\nError: Corrupt archive %s\n", current_file_path);
+                                                printf("\n\x1B[1mError:\x1B[0m Corrupt archive %s\n", current_file_path);
                                                 // Copy the first part of the message
                                                 strncpy(errorMessage, current_file_path, MAX_ERROR_LENGTH - 1);
                                                 errorMessage[MAX_ERROR_LENGTH - 1] = '\0'; // Ensure null-termination
@@ -301,7 +307,7 @@ void get_directory_contents(STRPTR dir_path, STRPTR output_directory)
                                             }
                                             else
                                             {
-                                                printf("\nError: Failed to execute command lha for file %s\nPlease check the archive is not damaged, and there is enough space in the\ntarget directory.  The program will now quit to prevent possible\nflood of popup messages.\n", current_file_path);
+                                                printf("\n\x1B[1mError:\x1B[0m Failed to execute command lha for file %s\nPlease check the archive is not damaged, and there is enough space in the\ntarget directory.  The program will now quit to prevent possible\nflood of popup messages.\n", current_file_path);
                                                 // Copy the first part of the message
                                                 strncpy(errorMessage, current_file_path, MAX_ERROR_LENGTH - 1);
                                                 errorMessage[MAX_ERROR_LENGTH - 1] = '\0'; // Ensure null-termination
@@ -342,9 +348,6 @@ int check_disk_space(STRPTR path, int min_space_mb)
 
     if (!info)
         return -1; // Allocation failed, can't check disk space
-
-
-    
     if (!lock)
     {
         FreeMem(info, sizeof(struct InfoData));
@@ -357,7 +360,16 @@ int check_disk_space(STRPTR path, int min_space_mb)
     {
         // Convert available blocks to bytes and then to megabytes
         free_space = ((long )info->id_NumBlocks - (long )info->id_NumBlocksUsed) * (long )info->id_BytesPerBlock / 1024 / 1024;
-        if (free_space < min_space_mb)
+
+        #ifdef DEBUG
+            printf("Free space: %ld\n", free_space);
+        #endif
+
+        if (free_space < 0)
+        {
+            result = 0; // Assume very large disk, so return 0
+        }
+        else if (free_space < min_space_mb)
         {
             result = -3; // Not enough space
         }
@@ -372,17 +384,121 @@ int check_disk_space(STRPTR path, int min_space_mb)
     return result;
 }
 
+
+//********************************************
+//***  unit tests
+
+// void test_fix_dos_formatting() {
+//     char path1[] = "//test/path//";
+//     char path2[] = "C:/folder/:/file";
+//     fix_dos_formatting(path1);
+//     fix_dos_formatting(path2);
+//     printf("Path1: %s\n",path1);
+//     printf("Test fix_dos_formatting: %s\n", strcmp(path1, "/test/path/") == 0 ? "Passed" : "Failed");
+//     printf("Path2: %s\n",path2);
+//     printf("Test fix_dos_formatting: %s\n", strcmp(path2, "C/folder/file") == 0 ? "Passed" : "Failed");
+// }
+
+// void test_remove_text() {
+//     char testStr1[] = "HelloWorld";
+//     char testStr2[] = "TestString";
+//     char *result1 = remove_text(testStr1, "Hello");
+//     char *result2 = remove_text(testStr2, "String");
+//     printf("Test remove_text: %s\n", strcmp(result1, "World") == 0 ? "Passed" : "Failed");
+//     printf("Test remove_text: %s\n", strcmp(result2, "Test") == 0 ? "Passed" : "Failed");
+// }
+
+// void test_ends_with_lha() {
+//     const char *filename1 = "game.lha";
+//     const char *filename2 = "image.png";
+//     printf("Test ends_with_lha: %s\n", ends_with_lha(filename1) ? "Passed" : "Failed");
+//     printf("Test ends_with_lha: %s\n", !ends_with_lha(filename2) ? "Passed" : "Failed");
+// }
+
+// void test_get_file_path() {
+//     const char *fullPath = "/folder/subfolder/file.txt";
+//     char *path = get_file_path(fullPath);
+//     printf("Test get_file_path: %s\n", strcmp(path, "/folder/subfolder/") == 0 ? "Passed" : "Failed");
+//     free(path); // Assuming get_file_path uses dynamic memory allocation
+// }
+
+// void test_does_file_exist() {
+//     const char *existingFile = "dh0:test";
+//     const char *nonExistingFile = "dh0:nonexistentfile.txt";
+//     printf("Test does_file_exist: %s\n", does_file_exist(existingFile) ? "Passed" : "Failed");
+//     printf("Test does_file_exist: %s\n", !does_file_exist(nonExistingFile) ? "Passed" : "Failed");
+// }
+
+// void test_does_folder_exists() {
+//     const char *existingFolder = "dh0:testfolder";
+//     const char *nonExistingFolder = "dh0:nonexistentfolder";
+//     printf("Test does_folder_exists: %s\n", does_folder_exists(existingFolder) ? "Passed" : "Failed");
+//     printf("Test does_folder_exists: %s\n", !does_folder_exists(nonExistingFolder) ? "Passed" : "Failed");
+// }
+
+// void test_remove_trailing_slash() {
+//     char pathWithSlash[] = "dh0:testfolder/";
+//     char pathWithoutSlash[] = "dh0:testfolder";
+//     remove_trailing_slash(pathWithSlash);
+//     remove_trailing_slash(pathWithoutSlash);
+//     printf("Test remove_trailing_slash: %s\n", strcmp(pathWithSlash, "dh0:testfolder") == 0 ? "Passed" : "Failed");
+//     printf("Test remove_trailing_slash: %s\n", strcmp(pathWithoutSlash, "dh0:testfolder") == 0 ? "Passed" : "Failed");
+// }
+
+// void test_log_and_print_errors() {
+//     // Clear previous logs if any
+//     errorCount = 0;
+//     memset(errorMessages, 0, sizeof(errorMessages));
+    
+//     // Log some test errors
+//     logError("Error 1: File not found");
+//     logError("Error 2: Access denied");
+//     logError("Error 3: Read error on disk");
+    
+//     // Now print all logged errors
+//     printf("Printing logged errors:\n");
+//     printErrors();
+//     printf("Test log_and_print_errors: %s\n", errorCount == 3 ? "Passed" : "Failed");
+// }
+
+//     // test_fix_dos_formatting();
+//     // test_remove_text();
+//     // test_ends_with_lha();
+//     // test_get_file_path();
+//     // test_does_file_exist();
+//     // test_does_folder_exists();
+//     // test_remove_trailing_slash();
+//     // test_log_and_print_errors();
+
 int main(int argc, char *argv[])
 {
 
     int  i, disk_check_result;
     long elapsed_seconds, hours, minutes, seconds;
 
+
+    // test_fix_dos_formatting();
+    // test_remove_text();
+    // test_ends_with_lha();
+    // test_get_file_path();
+    // test_does_file_exist();
+    // test_does_folder_exists();
+    // test_remove_trailing_slash();
+    // test_log_and_print_errors();
+
+    // printf("\x1B[30m 30:\x1B[0m \n");// black
+    // printf("\x1B[31m 31:\x1B[0m \n");//white
+    // printf("\x1B[32m 32:\x1B[0m \n");// Blue 
+    // printf("\x1B[33m 33:\x1B[0m \n");// Grey
+
     printf("\n");
+    printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", version_number);
+    //printf("\x1B[32m Created to seach subfolders for LHA archives and extract to a new location\n and maintaining the folder structure the archive was found in.\x1B[0m \n\n");
+    printf("\x1B[32mThis program is designed to automatically locate LHA archive files within\nnested subdirectories, extract their contents to a specified destination, \nand preserve the original directory hierarchy in which the archives\nwere located.\x1B[0m \n\n");
 
     if (argc < 2)
     {
-        printf("Usage: WHDArchiveExtractor <source_directory> <output_directory>\nWHD Archive Extractor V%s\n", version_number);
+        printf("\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> <output_directory>\n");
         return 1;
     }
 
@@ -396,8 +512,8 @@ int main(int argc, char *argv[])
 
     output_directory = argv[2];
 #ifdef DEBUG
-    dir_path = "PC0:WHDLoad/Beta";
-    output_directory = "DH1:";
+    dir_path = "WHD:";
+    output_directory = "PC:WHDTarget";
 #endif
     for (i = 3; i < argc; i++)
     {
@@ -415,9 +531,8 @@ int main(int argc, char *argv[])
 
     source_file_path = dir_path;
 
-
-    printf("Scanning directory: %s\n", dir_path);
-    printf("Extracting archives to: %s\n", output_directory);
+    printf("\x1B[1mScanning directory:    \x1B[0m %s\n", dir_path);
+    printf("\x1B[1mExtracting archives to:\x1B[0m %s\n", output_directory);
 
     if (does_folder_exists(dir_path)==0)
     {
@@ -436,8 +551,9 @@ int main(int argc, char *argv[])
         disk_check_result = check_disk_space(output_directory, 20);
         if (disk_check_result < 0)
         {
+            printf("Disk check result: %d\n", disk_check_result);
             // To do: handle various error cases based on the result code
-            printf("\nError: Not enough space on the target drive or cannot check space.\n20MB miniumum checked for.  To disable this check, launch the\nprogram with the '-skipdiskcheck' command.\n");
+            printf("\n\x1B[1mError:\x1B[0m Not enough space on the target drive or cannot check space.\n20MB miniumum checked for.  To disable this check, launch the\nprogram with the \x1B[3m-skipdiskcheck\x1B[23m command.\n\n");
             return 0;
         }
     }
@@ -451,9 +567,12 @@ int main(int argc, char *argv[])
     hours = elapsed_seconds / 3600;
     minutes = (elapsed_seconds % 3600) / 60;
     seconds = elapsed_seconds % 60;
-    printf("Scanned %d directories and found %d archives\n", num_dir_scanned, archives_found);
-    printf("Elapsed time: %ld:%02ld:%02ld\n", hours, minutes, seconds);
+    printf("Scanned \x1B[1m%d\x1B[0m directories and found \x1B[1m%d\x1B[0m archives\n", num_dir_scanned, archives_found);
+    printf("Elapsed time: \x1B[1m%ld:%02ld:%02ld\x1B[0m\n", hours, minutes, seconds);
     printErrors();
     printf("\nWHDArchiveExtractor V%s\n", version_number);
     return 0;
 }
+
+
+
