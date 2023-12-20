@@ -42,227 +42,228 @@
 #define false 0
 #define MAX_ERRORS 40
 #define MAX_ERROR_LENGTH 256
-
 #define DEBUG
 
-long start_time;
-int archives_found;
-int num_dir_scanned;
-char version_number[] = "1.1.0";
-char *source_file_path;
-char *target_file_path;
-char errorMessages[MAX_ERRORS][MAX_ERROR_LENGTH];
-int errorCount = 0;
 bool skip_disk_space_check = false, test_archives_only = false;
-char errorMessage[MAX_ERROR_LENGTH];
-int stop_app = 0; /* used to stop the app if the lha extraction fails */
+char *input_file_path;
+char *output_file_path;
+char single_error_message[MAX_ERROR_LENGTH];
+char error_messages_array[MAX_ERRORS][MAX_ERROR_LENGTH];
+char version_number[] = "1.1.0";
+int num_archives_found;
+int error_count = 0;
+int num_directories_scanned;
+int should_stop_app = 0; /* used to stop the app if the lha extraction fails */
+long start_time;
 
-STRPTR dir_path;
-STRPTR output_directory;
+STRPTR input_directory_path;
+STRPTR output_directory_path;
 
 // Function prototypes
-void fix_dos_formatting (char *str);
-char *remove_text (char *input_str, STRPTR text_to_remove);
-int ends_with_lha (const char *filename);
-char *get_file_path (const char *full_path);
-void get_directory_contents (STRPTR dir_path, STRPTR output_directory);
-int does_file_exist (char *filename);
-int does_folder_exists (const char *folder_name);
-void remove_trailing_slash (char *str);
-void logError (const char *errorMessage);
-void printErrors (void);
-int check_disk_space (STRPTR path, int min_space_mb);
+char *get_file_path(const char *full_path);
+char *remove_text(char *input_str, STRPTR text_to_remove);
+int check_disk_space(STRPTR path, int min_space_mb);
+int does_file_exist(char *filename);
+int does_folder_exists(const char *folder_name);
+int ends_with_lha(const char *filename);
+void fix_dos_formatting(char *str);
+void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path);
+void logError(const char *errorMessage);
+void printErrors(void);
+void remove_trailing_slash(char *str);
 
-// testing prototypes
 
-/* Function to replace "//" with "/" and ":/" with ":" in input string */
-void
-fix_dos_formatting (char *str)
+
+/* Function to replace invalid Amiga DOS path text.
+   Replace "//" with "/" and ":/" with ":" in input string.
+   Also handles consecutive colons by replacing them with a slash. */
+void fix_dos_formatting(char *str)
 {
-  /* Variables to iterate over input string and updated string */
-  char *p = str;
-  char *q = str;
+  char *p = str, *q = str;
 
-  /* Replace "//" with "/", ":/" with ":", and remove leading '/' */
-  while (*p != '\0')
-    {
-      if (p == str && *p == '/')
-        {
-          /* Skip leading '/' */
-          p++;
-        }
-      else if (*p == '/' && *(p + 1) == '/')
-        {
-          /* Replace '//' with '/' */
+  if (str == NULL) {
+    fprintf(stderr, "Input string is NULL.\n");
+    return;
+  }
+
+  if (!*p) { // Check for empty string
+    return;
+  }
+
+  while (*p != '\0') {
+    switch (*p) {
+      case '/':
+        if (p == str || *(p + 1) == '/') {
           *q = '/';
           p += 2;
-        }
-      else if (*p == ':' && *(p + 1) == '/')
-        {
-          /* Replace ':/' with ':' */
-          *q = ':';
-          p += 2;
-        }
-      else
-        {
-          /* Copy character from input to updated string */
+        } else if (p > str && *(p - 1) == ':') { // Handle consecutive colons
+          *q = '/';
+          p++;
+        } else {
           *q = *p;
           p++;
         }
-      q++;
+        break;
+      case ':':
+        if (*(p + 1) == '/') {
+          *q = ':';
+          p += 2;
+        } else {
+          *q = *p;
+          p++;
+        }
+        break;
+      default:
+        *q = *p;
+        p++;
     }
-  *q = '\0'; /* Add null terminator to end of updated string */
+    q++;
+  }
+  *q = '\0'; // Ensure null termination
 }
 
-char *
-remove_text (char *input_str, STRPTR text_to_remove)
+char *remove_text(char *input_str, STRPTR text_to_remove)
 {
   // int input_len = strlen(input_str);
-  int remove_len = strlen (text_to_remove);
+  int remove_len = strlen(text_to_remove);
 
   /* Check if the second string exists at the start of the first string */
-  if (strncmp (input_str, text_to_remove, remove_len) == 0)
-    {
-      /* If the second string is found, return a pointer to the rest of the
-       * first string*/
-      return input_str + remove_len;
-    }
+  if (strncmp(input_str, text_to_remove, remove_len) == 0)
+  {
+    /* If the second string is found, return a pointer to the rest of the
+     * first string*/
+    return input_str + remove_len;
+  }
 
   /*If the second string is not found, return the original first string*/
   return input_str;
 }
 
-int
-ends_with_lha (const char *filename)
+int ends_with_lha(const char *filename)
 {
-  size_t len = strlen (filename);
-  return len > 4 && strcmp (filename + len - 4, ".lha") == 0;
+  size_t len = strlen(filename);
+  return len > 4 && strcmp(filename + len - 4, ".lha") == 0;
 }
 
-char* get_file_extension(const char *filename) {
-  const char* extensionStart;
-char* uppercaseExtension;
-int i = 0;
-    size_t len = strlen(filename);
-    if (len < 4) {
-        return NULL; // Return NULL if the string is too short
-    }
+char *get_file_extension(const char *filename)
+{
+  const char *extensionStart;
+  char *uppercaseExtension;
+  int i = 0;
+  size_t len = strlen(filename);
+  if (len < 4)
+  {
+    return NULL; // Return NULL if the string is too short
+  }
 
-    extensionStart = filename + len - 4;
-    uppercaseExtension = malloc(5 * sizeof(char)); // 4 characters + null terminator
-    if (!uppercaseExtension) {
-        return NULL; // Return NULL if memory allocation fails
-    }
-    for (i = 0; i < 4; i++) {
-        uppercaseExtension[i] = toupper(extensionStart[i]);
-    }
-    uppercaseExtension[4] = '\0';
+  extensionStart = filename + len - 4;
+  uppercaseExtension = malloc(5 * sizeof(char)); // 4 characters + null terminator
+  if (!uppercaseExtension)
+  {
+    return NULL; // Return NULL if memory allocation fails
+  }
+  for (i = 0; i < 4; i++)
+  {
+    uppercaseExtension[i] = toupper(extensionStart[i]);
+  }
+  uppercaseExtension[4] = '\0';
 
-    return uppercaseExtension;
+  return uppercaseExtension;
 }
 
-char *
-get_file_path (const char *full_path)
+char *get_file_path(const char *full_path)
 {
   char *file_path = NULL;
 
   /* Find the last occurrence of the path separator character */
-  const char *last_slash = strrchr (full_path, '/');
-  const char *last_back_slash = strrchr (full_path, '\\');
-  const char *last_path_separator
-      = last_slash > last_back_slash ? last_slash : last_back_slash;
+  const char *last_slash = strrchr(full_path, '/');
+  const char *last_back_slash = strrchr(full_path, '\\');
+  const char *last_path_separator = last_slash > last_back_slash ? last_slash : last_back_slash;
 
   if (last_path_separator != NULL)
+  {
+    /* Calculate the length of the file path */
+    size_t file_path_length = last_path_separator - full_path + 1;
+
+    /* Allocate memory for the file path string */
+    file_path = malloc(file_path_length + 1);
+
+    if (file_path != NULL)
     {
-      /* Calculate the length of the file path */
-      size_t file_path_length = last_path_separator - full_path + 1;
-
-      /* Allocate memory for the file path string */
-      file_path = malloc (file_path_length + 1);
-
-      if (file_path != NULL)
-        {
-          /* Copy the file path string to the newly allocated memory */
-          strncpy (file_path, full_path, file_path_length);
-          file_path[file_path_length] = '\0';
-        }
+      /* Copy the file path string to the newly allocated memory */
+      strncpy(file_path, full_path, file_path_length);
+      file_path[file_path_length] = '\0';
     }
+  }
 
   return file_path;
 }
 
-int
-does_file_exist (char *filename)
+int does_file_exist(char *filename)
 {
   FILE *file;
   /* Try to open the file for reading*/
-  if ((file = fopen (filename, "r")))
-    {
-      /* If successful, close the file and return 1*/
-      fclose (file);
-      return 1;
-    }
+  if ((file = fopen(filename, "r")))
+  {
+    /* If successful, close the file and return 1*/
+    fclose(file);
+    return 1;
+  }
   else
-    {
-      /* If not successful, return 0*/
-      return 0;
-    }
+  {
+    /* If not successful, return 0*/
+    return 0;
+  }
 }
 
-int
-does_folder_exists (const char *folder_name)
+int does_folder_exists(const char *folder_name)
 {
-  BPTR lock = Lock ((CONST_STRPTR)folder_name, ACCESS_READ);
+  BPTR lock = Lock((CONST_STRPTR)folder_name, ACCESS_READ);
   if (lock != 0)
-    {
-      UnLock (lock);
-      return 1; /* Folder exists*/
-    }
+  {
+    UnLock(lock);
+    return 1; /* Folder exists*/
+  }
   else
-    {
-      return 0; /* Folder does not exist */
-    }
+  {
+    return 0; /* Folder does not exist */
+  }
 }
 
-void
-remove_trailing_slash (char *str)
+void remove_trailing_slash(char *str)
 {
-  if (str != NULL && strlen (str) > 0 && str[strlen (str) - 1] == '/')
-    {
-      str[strlen (str) - 1] = '\0';
-    }
+  if (str != NULL && strlen(str) > 0 && str[strlen(str) - 1] == '/')
+  {
+    str[strlen(str) - 1] = '\0';
+  }
 }
 
-void
-logError (const char *errorMessage)
+void logError(const char *errorMessage)
 {
 
-  strncpy (errorMessages[errorCount], errorMessage, MAX_ERROR_LENGTH);
-  errorMessages[errorCount][MAX_ERROR_LENGTH - 1]
-      = '\0'; // Ensure null-termination
-  errorCount++;
+  strncpy(error_messages_array[error_count], errorMessage, MAX_ERROR_LENGTH);
+  error_messages_array[error_count][MAX_ERROR_LENGTH - 1] = '\0'; // Ensure null-termination
+  error_count++;
 }
 
-void
-printErrors ()
+void printErrors()
 {
   int i;
-  if (errorCount > 0)
+  if (error_count > 0)
+  {
+    printf("\n\x1B[1mErrors encountered during execution:\x1B[0m\n");
+    for (i = 0; i < error_count; i++)
     {
-      printf ("\n\x1B[1mErrors encountered during execution:\x1B[0m\n");
-      for (i = 0; i < errorCount; i++)
-        {
-          printf ("\x1B[1mError:\x1B[0m %d: %s\n", i + 1, errorMessages[i]);
-        }
+      printf("\x1B[1mError:\x1B[0m %d: %s\n", i + 1, error_messages_array[i]);
     }
+  }
   else
-    {
-      printf ("\nNo errors encountered.\n");
-    }
+  {
+    printf("\nNo errors encountered.\n");
+  }
 }
 
-void
-get_directory_contents (STRPTR dir_path, STRPTR output_directory)
+void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path)
 {
   struct FileInfoBlock *file_info_block;
   BPTR dir_lock;
@@ -274,349 +275,340 @@ get_directory_contents (STRPTR dir_path, STRPTR output_directory)
 
   char ExtractCommand[5];
 
-    //str[strlen (str) - 1] = '\0';
+  // str[strlen (str) - 1] = '\0';
 
-  dir_lock = Lock ((CONST_STRPTR)dir_path, ACCESS_READ);
+  dir_lock = Lock((CONST_STRPTR)input_directory_path, ACCESS_READ);
   if (dir_lock)
+  {
+    file_info_block = (struct FileInfoBlock *)AllocMem(
+        sizeof(struct FileInfoBlock), MEMF_CLEAR);
+    if (file_info_block)
     {
-      file_info_block = (struct FileInfoBlock *)AllocMem (
-          sizeof (struct FileInfoBlock), MEMF_CLEAR);
-      if (file_info_block)
+      if (Examine(dir_lock, file_info_block))
+      {
+        while (ExNext(dir_lock, file_info_block) && should_stop_app == 0)
         {
-          if (Examine (dir_lock, file_info_block))
+          if (strcmp(file_info_block->fib_FileName, ".") != 0 && strcmp(file_info_block->fib_FileName, "..") != 0)
+          {
+            strcpy(current_file_path, input_directory_path);
+            strcat(current_file_path, "/");
+            strcat(current_file_path, file_info_block->fib_FileName);
+
+            if (file_info_block->fib_DirEntryType > 0)
             {
-              while (ExNext (dir_lock, file_info_block) && stop_app == 0)
-                {
-                  if (strcmp (file_info_block->fib_FileName, ".") != 0
-                      && strcmp (file_info_block->fib_FileName, "..") != 0)
-                    {
-                      strcpy (current_file_path, dir_path);
-                      strcat (current_file_path, "/");
-                      strcat (current_file_path, file_info_block->fib_FileName);
+              num_directories_scanned++;
 
-                      if (file_info_block->fib_DirEntryType > 0)
-                        {
-                          num_dir_scanned++;
-
-                          get_directory_contents (current_file_path,
-                                                  output_directory);
-                        }
-                      else
-                        {
-                          file_extension = get_file_extension (file_info_block->fib_FileName);
-                          printf("File extension: %s\n", file_extension);
-                          if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0) {
-                              if (strcmp(file_extension, ".LHA") == 0) {
-                                  strcpy(program_name, "lha");
-                                  if (test_archives_only)
-                                  {
-                                    strcpy(ExtractCommand, "t\0");
-                                  }
-                                else
-                                  {
-                                    strcpy(ExtractCommand, "-T x\0");
-                                  }
-                              } else {
-                                  strcpy(program_name, "unlzx");
-                                  if (test_archives_only)
-                                  {
-                                    strcpy(ExtractCommand, "-v\0");
-                                  }
-                                else
-                                  {
-                                    strcpy(ExtractCommand, "-x\0");
-                                  }
-                              }
-
-                              // Check for disk space before extracting
-                              if (!skip_disk_space_check)
-                                {
-                                  int disk_check_result
-                                      = check_disk_space (output_directory, 20);
-                                  printf ("Disk check result: %d\n",
-                                          disk_check_result);
-                                  if (disk_check_result < 0)
-                                    {
-                                      // To do: handle various error cases based
-                                      // on the result code
-                                      printf (
-                                          "\x1B[1mError:\x1B[0m Not enough "
-                                          "space on the target drive or cannot "
-                                          "check space.\n20MB miniumum checked "
-                                          "for.  To disable this check, launch "
-                                          "the program\nwith the "
-                                          "'-skipdiskcheck' command.\n");
-                                      stop_app = 1;
-                                    }
-                                  else
-                                    {
-                                      archives_found++;
-
-                                      /* Combine the extraction command, source
-                                       * path, and output path */
-                                     // extraction_command[0]="\0";
-                                      sprintf (extraction_command,
-                                               "%s %s \"%s\" \"%s/%s\"",
-                                               program_name,
-                                               ExtractCommand,
-                                               current_file_path,
-                                               output_directory,
-                                               get_file_path (remove_text (
-                                                   current_file_path,
-                                                   source_file_path)));
-                                      // sprintf(extraction_command, "lha  -T x
-                                      // \"%s\" \"%s/%s\"", current_file_path,
-                                      // output_directory,
-                                      // get_file_path(remove_text(current_file_path,
-                                      // source_file_path)));
-                                      fix_dos_formatting (extraction_command);
-                                      printf ("ExtractCommand: %s\n", ExtractCommand);
-                                      printf ("Full command: %s\n", extraction_command);
-                                      
-                                      /* Execute the command*/ 
-                                      command_result = SystemTagList (
-                                          extraction_command, NULL);
-
-                                      /* Check for error */
-
-                                      if (command_result != 0)
-                                        {
-                                          if (command_result == 10)
-                                            {
-                                              printf ("\n\x1B[1mError:\x1B[0m "
-                                                      "Corrupt archive %s\n",
-                                                      current_file_path);
-                                              // Copy the first part of the
-                                              // message
-                                              strncpy (errorMessage,
-                                                       current_file_path,
-                                                       MAX_ERROR_LENGTH - 1);
-                                              errorMessage[MAX_ERROR_LENGTH - 1]
-                                                  = '\0'; // Ensure
-                                                          // null-termination
-
-                                              // Concatenate the error message
-                                              // if there's space
-                                              if (strlen (errorMessage)
-                                                      + strlen (" is corrupt")
-                                                  < MAX_ERROR_LENGTH)
-                                                {
-                                                  strcat (errorMessage,
-                                                          " is corrupt");
-                                                }
-                                              logError (errorMessage);
-                                            }
-                                          else
-                                            {
-                                              printf (
-                                                  "\n\x1B[1mError:\x1B[0m "
-                                                  "Failed to execute command "
-                                                  "lha for file %s\nPlease "
-                                                  "check the archive is not "
-                                                  "damaged, and there is "
-                                                  "enough space in the\ntarget "
-                                                  "directory.\n",
-                                                  current_file_path);
-                                              // Copy the first part of the
-                                              // message
-                                              strncpy (errorMessage,
-                                                       current_file_path,
-                                                       MAX_ERROR_LENGTH - 1);
-                                              errorMessage[MAX_ERROR_LENGTH - 1]
-                                                  = '\0'; // Ensure
-                                                          // null-termination
-
-                                              // Concatenate the error message
-                                              // if there's space
-                                              if (strlen (errorMessage)
-                                                      + strlen (
-                                                          " failed to extract. "
-                                                          "Unknown error")
-                                                  < MAX_ERROR_LENGTH)
-                                                {
-                                                  strcat (errorMessage,
-                                                          " failed to extract. "
-                                                          "Unknown error");
-                                                }
-                                              logError (errorMessage);
-                                            }
-                                        }
-                                      // if the number of errors is greater then
-                                      // MAX_ERRORS, then quit
-                                      if (errorCount >= MAX_ERRORS)
-                                        {
-                                          printf ("Maximum number of errors "
-                                                  "reached. Aborting.\n");
-                                          stop_app = 1;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+              get_directory_contents(current_file_path,
+                                     output_directory_path);
             }
-          FreeMem (file_info_block, sizeof (struct FileInfoBlock));
+            else
+            {
+              file_extension = get_file_extension(file_info_block->fib_FileName);
+              printf("File extension: %s\n", file_extension);
+              if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
+              {
+                if (strcmp(file_extension, ".LHA") == 0)
+                {
+                  strcpy(program_name, "lha");
+                  if (test_archives_only)
+                  {
+                    strcpy(ExtractCommand, "t\0");
+                  }
+                  else
+                  {
+                    strcpy(ExtractCommand, "-T x\0");
+                  }
+                }
+                else
+                {
+                  strcpy(program_name, "unlzx");
+                  if (test_archives_only)
+                  {
+                    strcpy(ExtractCommand, "-v\0");
+                  }
+                  else
+                  {
+                    strcpy(ExtractCommand, "-x\0");
+                  }
+                }
+
+                // Check for disk space before extracting
+                if (!skip_disk_space_check)
+                {
+                  int disk_check_result = check_disk_space(output_directory_path, 20);
+                  printf("Disk check result: %d\n",
+                         disk_check_result);
+                  if (disk_check_result < 0)
+                  {
+                    // To do: handle various error cases based
+                    // on the result code
+                    printf(
+                        "\x1B[1mError:\x1B[0m Not enough "
+                        "space on the target drive or cannot "
+                        "check space.\n20MB miniumum checked "
+                        "for.  To disable this check, launch "
+                        "the program\nwith the "
+                        "'-skipdiskcheck' command.\n");
+                    should_stop_app = 1;
+                  }
+                  else
+                  {
+                    num_archives_found++;
+
+                    /* Combine the extraction command, source
+                     * path, and output path */
+                    // extraction_command[0]="\0";
+                    sprintf(extraction_command,
+                            "%s %s \"%s\" \"%s/%s\"",
+                            program_name,
+                            ExtractCommand,
+                            current_file_path,
+                            output_directory_path,
+                            get_file_path(remove_text(
+                                current_file_path,
+                                input_file_path)));
+                    // sprintf(extraction_command, "lha  -T x
+                    // \"%s\" \"%s/%s\"", current_file_path,
+                    // output_directory_path,
+                    // get_file_path(remove_text(current_file_path,
+                    // source_file_path)));
+                    fix_dos_formatting(extraction_command);
+                    printf("ExtractCommand: %s\n", ExtractCommand);
+                    printf("Full command: %s\n", extraction_command);
+
+                    /* Execute the command*/
+                    command_result = SystemTagList(
+                        extraction_command, NULL);
+
+                    /* Check for error */
+
+                    if (command_result != 0)
+                    {
+                      if (command_result == 10)
+                      {
+                        printf("\n\x1B[1mError:\x1B[0m "
+                               "Corrupt archive %s\n",
+                               current_file_path);
+                        // Copy the first part of the
+                        // message
+                        strncpy(single_error_message,
+                                current_file_path,
+                                MAX_ERROR_LENGTH - 1);
+                        single_error_message[MAX_ERROR_LENGTH - 1] = '\0'; // Ensure
+                                                                           // null-termination
+
+                        // Concatenate the error message
+                        // if there's space
+                        if (strlen(single_error_message) + strlen(" is corrupt") < MAX_ERROR_LENGTH)
+                        {
+                          strcat(single_error_message,
+                                 " is corrupt");
+                        }
+                        logError(single_error_message);
+                      }
+                      else
+                      {
+                        printf(
+                            "\n\x1B[1mError:\x1B[0m "
+                            "Failed to execute command "
+                            "lha for file %s\nPlease "
+                            "check the archive is not "
+                            "damaged, and there is "
+                            "enough space in the\ntarget "
+                            "directory.\n",
+                            current_file_path);
+                        // Copy the first part of the
+                        // message
+                        strncpy(single_error_message,
+                                current_file_path,
+                                MAX_ERROR_LENGTH - 1);
+                        single_error_message[MAX_ERROR_LENGTH - 1] = '\0'; // Ensure
+                                                                           // null-termination
+
+                        // Concatenate the error message
+                        // if there's space
+                        if (strlen(single_error_message) + strlen(
+                                                               " failed to extract. "
+                                                               "Unknown error") <
+                            MAX_ERROR_LENGTH)
+                        {
+                          strcat(single_error_message,
+                                 " failed to extract. "
+                                 "Unknown error");
+                        }
+                        logError(single_error_message);
+                      }
+                    }
+                    // if the number of errors is greater then
+                    // MAX_ERRORS, then quit
+                    if (error_count >= MAX_ERRORS)
+                    {
+                      printf("Maximum number of errors "
+                             "reached. Aborting.\n");
+                      should_stop_app = 1;
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
-      UnLock (dir_lock);
+      }
+      FreeMem(file_info_block, sizeof(struct FileInfoBlock));
     }
+    UnLock(dir_lock);
+  }
 }
 
-int
-check_disk_space (STRPTR path, int min_space_mb)
+int check_disk_space(STRPTR path, int min_space_mb)
 {
-  struct InfoData *info = AllocMem (sizeof (struct InfoData), MEMF_CLEAR);
-  BPTR lock = Lock (path, ACCESS_READ);
+  struct InfoData *info = AllocMem(sizeof(struct InfoData), MEMF_CLEAR);
+  BPTR lock = Lock(path, ACCESS_READ);
   long free_space;
   int result;
 
   if (!info)
     return -1; // Allocation failed, can't check disk space
   if (!lock)
-    {
-      FreeMem (info, sizeof (struct InfoData));
-      return -2; // Unable to lock the path, can't check disk space
-    }
+  {
+    FreeMem(info, sizeof(struct InfoData));
+    return -2; // Unable to lock the path, can't check disk space
+  }
 
   result = 0; // Default to 0, meaning there's enough space
 
-  if (Info (lock, info))
-    {
-      // Convert available blocks to bytes and then to megabytes
-      free_space = ((long)info->id_NumBlocks - (long)info->id_NumBlocksUsed)
-                   * (long)info->id_BytesPerBlock / 1024 / 1024;
+  if (Info(lock, info))
+  {
+    // Convert available blocks to bytes and then to megabytes
+    free_space = ((long)info->id_NumBlocks - (long)info->id_NumBlocksUsed) * (long)info->id_BytesPerBlock / 1024 / 1024;
 
 #ifdef DEBUG
-      printf ("Free space: %ld\n", free_space);
+    printf("Free space: %ld\n", free_space);
 #endif
 
-      if (free_space < 0)
-        {
-          result = 0; // Assume very large disk, so return 0
-        }
-      else if (free_space < min_space_mb)
-        {
-          result = -3; // Not enough space
-        }
-    }
-  else
+    if (free_space < 0)
     {
-      result = -4; // Info call failed
+      result = 0; // Assume very large disk, so return 0
     }
+    else if (free_space < min_space_mb)
+    {
+      result = -3; // Not enough space
+    }
+  }
+  else
+  {
+    result = -4; // Info call failed
+  }
 
-  UnLock (lock);
-  FreeMem (info, sizeof (struct InfoData));
+  UnLock(lock);
+  FreeMem(info, sizeof(struct InfoData));
   return result;
 }
 
-
-
-int
-main (int argc, char *argv[])
+int main(int argc, char *argv[])
 {
 
   int i, disk_check_result;
   long elapsed_seconds, hours, minutes, seconds;
-
 
   // printf("\x1B[30m 30:\x1B[0m \n");// black
   // printf("\x1B[31m 31:\x1B[0m \n");//white
   // printf("\x1B[32m 32:\x1B[0m \n");// Blue
   // printf("\x1B[33m 33:\x1B[0m \n");// Grey
 
-  printf ("\n");
-  printf ("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n",
-          version_number);
+  printf("\n");
+  printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n",
+         version_number);
 
-  printf ("\x1B[32mThis program is designed to automatically locate LHA "
-          "archive files within\nnested subdirectories, extract their contents "
-          "to a specified destination, \nand preserve the original directory "
-          "hierarchy in which the archives\nwere located.\x1B[0m \n\n");
+  printf("\x1B[32mThis program is designed to automatically locate LHA "
+         "archive files within\nnested subdirectories, extract their contents "
+         "to a specified destination, \nand preserve the original directory "
+         "hierarchy in which the archives\nwere located.\x1B[0m \n\n");
 
   if (argc < 2)
-    {
-      printf ("\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
-              "<output_directory> [-skipspacecheck] [-testarchivesonly]\n\n");
-      return 1;
-    }
+  {
+    printf("\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
+           "<output_directory_path> [-skipspacecheck] [-testarchivesonly]\n\n");
+    return 1;
+  }
 
-  if (!does_file_exist ("c:lha"))
-    {
-      printf ("File c:lha does not exist. As this program requires it to "
-              "extract the archives, it will now quit. Please install the "
-              "latest version of lha.run from www.aminet.org\n");
-      return 0;
-    }
+  if (!does_file_exist("c:lha"))
+  {
+    printf("File c:lha does not exist. As this program requires it to "
+           "extract the archives, it will now quit. Please install the "
+           "latest version of lha.run from www.aminet.org\n");
+    return 0;
+  }
 
-  dir_path = argv[1];
+  input_directory_path = argv[1];
 
-  output_directory = argv[2];
+  output_directory_path = argv[2];
 
 #ifdef DEBUG
-  dir_path = "WHD:";
-  output_directory = "PC:WHDTarget";
+  input_directory_path = "WHD:";
+  output_directory_path = "PC:WHDTarget";
 #endif
 
   for (i = 4; i < argc; i++)
+  {
+    if (strcmp(argv[i], "-skipspacecheck") == 0)
     {
-      if (strcmp (argv[i], "-skipspacecheck") == 0)
-        {
-          skip_disk_space_check = true;
-        }
-      if (strcmp (argv[i], "-testarchivesonly") == 0)
-        {
-          test_archives_only = true;
-        }
+      skip_disk_space_check = true;
     }
-
-  remove_trailing_slash (dir_path);
-  remove_trailing_slash (output_directory);
-
-  source_file_path = dir_path;
-
-  printf ("\x1B[1mScanning directory:    \x1B[0m %s\n", dir_path);
-  printf ("\x1B[1mExtracting archives to:\x1B[0m %s\n", output_directory);
-
-  if (does_folder_exists (dir_path) == 0)
+    if (strcmp(argv[i], "-testarchivesonly") == 0)
     {
-      printf ("\nUnable to find the source folder %s\n\n", dir_path);
-      return 0;
+      test_archives_only = true;
     }
-  if (does_folder_exists (output_directory) == 0)
-    {
-      printf ("\nUnable to find the target folder %s\n\n", output_directory);
-      return 0;
-    }
+  }
+
+  remove_trailing_slash(input_directory_path);
+  remove_trailing_slash(output_directory_path);
+
+  input_file_path = input_directory_path;
+
+  printf("\x1B[1mScanning directory:    \x1B[0m %s\n", input_directory_path);
+  printf("\x1B[1mExtracting archives to:\x1B[0m %s\n", output_directory_path);
+
+  if (does_folder_exists(input_directory_path) == 0)
+  {
+    printf("\nUnable to find the source folder %s\n\n", input_directory_path);
+    return 0;
+  }
+  if (does_folder_exists(output_directory_path) == 0)
+  {
+    printf("\nUnable to find the target folder %s\n\n", output_directory_path);
+    return 0;
+  }
 
   if (!skip_disk_space_check)
+  {
+    disk_check_result = check_disk_space(output_directory_path, 20);
+    if (disk_check_result < 0)
     {
-      disk_check_result = check_disk_space (output_directory, 20);
-      if (disk_check_result < 0)
-        {
-          // To do: handle various error cases based on the result code
-          printf ("\n\x1B[1mError:\x1B[0m Not enough space on the target drive "
-                  "or cannot check space.\n20MB miniumum checked for.  To "
-                  "disable this check, launch the\nprogram with the "
-                  "\x1B[3m-skipdiskcheck\x1B[23m command.\n\n");
-          return 0;
-        }
+      // To do: handle various error cases based on the result code
+      printf("\n\x1B[1mError:\x1B[0m Not enough space on the target drive "
+             "or cannot check space.\n20MB miniumum checked for.  To "
+             "disable this check, launch the\nprogram with the "
+             "\x1B[3m-skipdiskcheck\x1B[23m command.\n\n");
+      return 0;
     }
+  }
   /* Start timer */
-  start_time = time (NULL);
+  start_time = time(NULL);
 
-  get_directory_contents (dir_path, output_directory);
+  get_directory_contents(input_directory_path, output_directory_path);
 
   /* Calculate elapsed time */
-  elapsed_seconds = time (NULL) - start_time;
+  elapsed_seconds = time(NULL) - start_time;
   hours = elapsed_seconds / 3600;
   minutes = (elapsed_seconds % 3600) / 60;
   seconds = elapsed_seconds % 60;
-  printf ("Scanned \x1B[1m%d\x1B[0m directories and found \x1B[1m%d\x1B[0m "
-          "archives\n",
-          num_dir_scanned, archives_found);
-  printf ("Elapsed time: \x1B[1m%ld:%02ld:%02ld\x1B[0m\n", hours, minutes,
-          seconds);
-  printErrors ();
-  printf ("\nWHDArchiveExtractor V%s\n", version_number);
+  printf("Scanned \x1B[1m%d\x1B[0m directories and found \x1B[1m%d\x1B[0m "
+         "archives\n",
+         num_directories_scanned, num_archives_found);
+  printf("Elapsed time: \x1B[1m%ld:%02ld:%02ld\x1B[0m\n", hours, minutes,
+         seconds);
+  printErrors();
+  printf("\nWHDArchiveExtractor V%s\n", version_number);
   return 0;
 }
