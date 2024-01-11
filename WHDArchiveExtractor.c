@@ -18,6 +18,8 @@
 
   To use this program, ensure the LHA software is installed in the C:
   directory. You can download it from aminet.net/package/util/arc/lha.
+  unlzx is also supported for LZX archives, and can be downloaded from
+  aminet.net/package/util/arc/lzx121r1
 
   Created 02/04/2023 and compiled on the PC using VBCC.
   This program is released under the MIT License.
@@ -69,6 +71,7 @@ void  get_directory_contents(STRPTR input_directory_path, STRPTR output_director
 void  logError(const char *errorMessage);
 void  printErrors(void);
 void  remove_trailing_slash(char *str);
+int   num_lzx_archives_found;
 
 /* Function to replace invalid Amiga DOS path text.
    Replace "//" with "/" and ":/" with ":" in input string.
@@ -268,6 +271,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                     strcpy(ExtractCommand, "-T x\0");
                   }
                 } else {
+                  num_lzx_archives_found=num_lzx_archives_found+1;
                   strcpy(program_name, "unlzx");
                   if (test_archives_only) {
                     strcpy(ExtractCommand, "-v\0");
@@ -431,6 +435,13 @@ int main(int argc, char *argv[]) {
         "latest version of lha.run from www.aminet.org\n");
     return 0;
   }
+
+  if (!does_file_exist("c:unlzx")) {
+    printf(
+        "File c:un does not exist. As this program requires it to "
+        "extract the archives, it will now quit. Please install the "
+        "latest version of lha.run from www.aminet.org\n");
+  }
   
   if (argc < 2) {
     printf(
@@ -487,6 +498,9 @@ int main(int argc, char *argv[]) {
       return 0;
     }
   }
+
+  num_lzx_archives_found = 0;
+
   /* Start timer */
   start_time = time(NULL);
 
@@ -501,6 +515,9 @@ int main(int argc, char *argv[]) {
       "Scanned \x1B[1m%d\x1B[0m directories and found \x1B[1m%d\x1B[0m "
       "archives\n",
       num_directories_scanned, num_archives_found);
+
+  if (num_lzx_archives_found > 0) {
+  }
   printf("Elapsed time: \x1B[1m%ld:%02ld:%02ld\x1B[0m\n", hours, minutes, seconds);
   printErrors();
   printf("\nWHDArchiveExtractor V%s\n", version_number);
