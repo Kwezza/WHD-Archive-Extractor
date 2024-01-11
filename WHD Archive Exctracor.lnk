@@ -1,5 +1,4 @@
 FROM LIB:c.o "WHDArchiveExtractor.o"
-TO "WHDArchiveExtractor"
+TO "WHD Archive Exctracor"
 LIB LIB:sc.lib LIB:amiga.lib
-ADDSYM
 
