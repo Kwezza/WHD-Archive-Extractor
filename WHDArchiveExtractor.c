@@ -165,7 +165,6 @@ char *get_file_extension(const char *filename)
   const char *extensionStart;
   char *uppercaseExtension;
   int i = 0;
-
   size_t len = strlen(filename);
   if (len < 4)
   {
@@ -284,8 +283,9 @@ char *findFirstDirectory(char *filePath)
   FILE *file;
   char line[256]; /* Buffer to read each line into */
 
-if (does_file_exist(filePath) == 0)
+  if (does_file_exist(filePath) == 0)
   {
+    printf("File does not exist: %s\n", filePath);
     return NULL; /* Return NULL if file can't be opened */
   }
 
@@ -319,10 +319,11 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   BPTR dir_lock;
   char *file_extension;
   char current_file_path[256];
-  char ExtractCommand[12];
+  char ExtractCommand[20];
   char extraction_command[256];
   char *directoryName;
   char program_name[6];
+  char fileCommandStore[256];
   LONG command_result;
 
   struct FileInfoBlock *file_info_block;
@@ -352,45 +353,55 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
             }
             else
             {
-              printf("current_file_path: %s\n", current_file_path);
-              printf("input_file_path: %s\n", input_file_path);
+
+              //printf("current_file_path: %s\n", current_file_path);
+              //printf("input_file_path: %s\n", input_file_path);
               file_extension = get_file_extension(file_info_block->fib_FileName);
-              printf("File extension: %s\n", file_extension);
+              //printf("File extension: %s\n", file_extension);
               if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
               {
-
+                sprintf(fileCommandStore, "%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
+                fix_dos_formatting(fileCommandStore);
+                printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n",file_info_block->fib_FileName, fileCommandStore);
                 if (strcmp(file_extension, ".LHA") == 0)
                 {
-                  printf("LHA archive found: %s\n", current_file_path);
-                  printf("current_file_path: %s\n", current_file_path);
-                  printf("input_file_path: %s\n", input_file_path);
                   num_lha_archives_found++;
                   strcpy(program_name, "lha");
-                  printf("0 current_file_path: %s\n", current_file_path);
-                  printf("0 current_file_path: %s\n", current_file_path);
                   if (test_archives_only)
                   {
                     strcpy(ExtractCommand, "t\0");
                   }
                   else
                   {
-                    printf("1 current_file_path: %s\n", current_file_path);
                     strcpy(ExtractCommand, "-T -M -N -m x\0");
-                    printf("1 current_file_path: %s\n", current_file_path);
+
                     if (resetProtectionBits == 1)
                     {
-                      printf("2 current_file_path: %s\n", current_file_path);
-                      printf("2 input_file_path: %s\n", input_file_path);
+
                       sprintf(extraction_command, "lha vq \"%s\" >ram:listing.txt", current_file_path);
-                      printf("2 Extraction command: %s\n", extraction_command);
                       fix_dos_formatting(extraction_command);
                       SystemTagList(extraction_command, NULL);
                       directoryName = findFirstDirectory("ram:listing.txt");
-                      printf("About to scan text file.\n");
-                      sprintf(directoryName, "protect %s/%s #? ALL rwed", current_file_path, findFirstDirectory("ram:listing.txt"));
-                      printf("Protection command: %s\n", directoryName);
-                      SystemTagList(directoryName, NULL);
+                      if (directoryName != NULL)
+                      {
+                        sprintf(fileCommandStore, "%s/%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
+                        fix_dos_formatting(fileCommandStore);
+                        if (does_folder_exists(fileCommandStore) ==1)
+                        {
+                          sprintf(fileCommandStore, "protect %s/%s/%s/#? ALL rwed >NIL:", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
+                          fix_dos_formatting(fileCommandStore);
+                          printf("Prepping any protected files for potential replacement...\n");
+                          SystemTagList(fileCommandStore, NULL);
+                        }
+                      }
+                      else
+                      {
+                        printf("Unable to get the file path from the LHA output for file %s.\n", current_file_path);
+                      }
                     }
+                    DeleteFile("ram:listing.txt");
+                    ExtractCommand[0] = '\0';
+                    strcpy(ExtractCommand, "-T -M -N -m x\0");
                   }
                 }
                 else
@@ -407,7 +418,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   }
                 }
 
-                printf("Target path: %s\n", get_file_path(remove_text(current_file_path, input_file_path)));
+                //printf("Target path: %s\n", get_file_path(remove_text(current_file_path, input_file_path)));
                 /* Check for disk space before extracting */
                 // printf("Skip disk space check: %d\n", skip_disk_space_check);
                 should_stop_app = 0;
@@ -437,7 +448,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                    * path, and output path */
                   sprintf(extraction_command, "%s %s \"%s\" \"%s/%s\"", program_name, ExtractCommand, current_file_path, output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
                   fix_dos_formatting(extraction_command);
-                  // printf("ExtractCommand: %s\n", ExtractCommand);
+                  printf("ExtractCommand: %s\n", ExtractCommand);
                   //
 
                   printf("Full command: %s\n", extraction_command);
