@@ -68,7 +68,7 @@ int check_disk_space(STRPTR path, int min_space_mb);
 int does_file_exist(char *filename);
 int does_folder_exists(const char *folder_name);
 int ends_with_lha(const char *filename);
-void fix_dos_formatting(char *str);
+void sanitizeAmigaPath(char *path);
 void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path);
 void logError(const char *errorMessage);
 void printErrors(void);
@@ -78,65 +78,64 @@ char *findFirstDirectory(char *filePath);
 int num_lzx_archives_found = 0;
 int num_lha_archives_found = 0;
 
-/* Function to replace invalid Amiga DOS path text.
-   Replace "//" with "/" and ":/" with ":" in input string.
-   Also handles consecutive colons by replacing them with a slash. */
-void fix_dos_formatting(char *str)
-{
-  char *p = str, *q = str;
 
-  if (str == NULL)
-  {
-    fprintf(stderr, "Input string is NULL.\n");
-    return;
-  }
+/*
+ * Sanitizes an Amiga file path in-place by removing or replacing specific invalid character sequences.
+ * Assumes the input buffer is large enough for the sanitized path.
+ * It replaces "//" with "/", ":/" with ":", and removes consecutive colons.
+ * Parameters:
+ *     char *path - Pointer to the original file path string to be modified in place.
+ */
 
-  if (!*p)
-  { /* Check for empty string */
-    return;
-  }
+/*
+ * Function to sanitize an Amiga file path in-place by correcting specific path issues.
+ * It ensures no slashes immediately follow a colon, replaces "//" with "/", and removes consecutive colons.
+ * Assumes the input buffer is large enough for the sanitized path.
+ */
+void sanitizeAmigaPath(char *path) {
+    ULONG len;
+    char *sanitizedPath;
+    int i, j;
 
-  while (*p != '\0')
-  {
-    switch (*p)
-    {
-    case '/':
-      if (p == str || *(p + 1) == '/')
-      {
-        *q = '/';
-        p += 2;
-      }
-      else if (p > str && *(p - 1) == ':')
-      { /* Handle consecutive colons */
-        *q = '/';
-        p++;
-      }
-      else
-      {
-        *q = *p;
-        p++;
-      }
-      break;
-    case ':':
-      if (*(p + 1) == '/')
-      {
-        *q = ':';
-        p += 2;
-      }
-      else
-      {
-        *q = *p;
-        p++;
-      }
-      break;
-    default:
-      *q = *p;
-      p++;
+    if (path == NULL) {
+        return;
     }
-    q++;
-  }
-  *q = '\0'; /* Ensure null termination */
+
+    len = strlen(path) + 1; // Include null terminator
+    sanitizedPath = (char *)AllocVec(len, MEMF_ANY | MEMF_CLEAR);
+    if (sanitizedPath == NULL) {
+        // Memory allocation failed
+        return;
+    }
+
+    i = 0;
+    j = 0;
+    while (path[i] != '\0') {
+        if (path[i] == ':') {
+            // Copy the colon
+            sanitizedPath[j++] = path[i++];
+            // Skip all following slashes
+            while (path[i] == '/') {
+                i++;
+            }
+        } else if (path[i] == '/' && path[i + 1] == '/') {
+            // Skip redundant slashes
+            i++;
+        } else {
+            // Copy other characters
+            sanitizedPath[j++] = path[i++];
+        }
+    }
+
+    sanitizedPath[j] = '\0'; // Ensure the result is null-terminated
+
+    // Copy back to the original path and free the allocated memory
+    strcpy(path, sanitizedPath);
+    FreeVec(sanitizedPath);
 }
+
+
+
 
 char *remove_text(char *input_str, STRPTR text_to_remove)
 {
@@ -329,6 +328,8 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   struct FileInfoBlock *file_info_block;
   resetProtectionBits = 1;
 
+  printf("Scanning directory: %s\n", input_directory_path);
+
   dir_lock = Lock((CONST_STRPTR)input_directory_path, ACCESS_READ);
   if (dir_lock)
   {
@@ -344,6 +345,8 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
             strcpy(current_file_path, input_directory_path);
             strcat(current_file_path, "/");
             strcat(current_file_path, file_info_block->fib_FileName);
+            sanitizeAmigaPath(current_file_path);
+
 
             if (file_info_block->fib_DirEntryType > 0)
             {
@@ -361,7 +364,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
               if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
               {
                 sprintf(fileCommandStore, "%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
-                fix_dos_formatting(fileCommandStore);
+                sanitizeAmigaPath(fileCommandStore);
                 printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n",file_info_block->fib_FileName, fileCommandStore);
                 if (strcmp(file_extension, ".LHA") == 0)
                 {
@@ -379,17 +382,17 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                     {
 
                       sprintf(extraction_command, "lha vq \"%s\" >ram:listing.txt", current_file_path);
-                      fix_dos_formatting(extraction_command);
+                      sanitizeAmigaPath(extraction_command);
                       SystemTagList(extraction_command, NULL);
                       directoryName = findFirstDirectory("ram:listing.txt");
                       if (directoryName != NULL)
                       {
                         sprintf(fileCommandStore, "%s/%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
-                        fix_dos_formatting(fileCommandStore);
+                        sanitizeAmigaPath(fileCommandStore);
                         if (does_folder_exists(fileCommandStore) ==1)
                         {
                           sprintf(fileCommandStore, "protect %s/%s/%s/#? ALL rwed >NIL:", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
-                          fix_dos_formatting(fileCommandStore);
+                          sanitizeAmigaPath(fileCommandStore);
                           printf("Prepping any protected files for potential replacement...\n");
                           SystemTagList(fileCommandStore, NULL);
                         }
@@ -447,7 +450,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   /* Combine the extraction command, source
                    * path, and output path */
                   sprintf(extraction_command, "%s %s \"%s\" \"%s/%s\"", program_name, ExtractCommand, current_file_path, output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
-                  fix_dos_formatting(extraction_command);
+                  sanitizeAmigaPath(extraction_command);
                   printf("ExtractCommand: %s\n", ExtractCommand);
                   //
 
