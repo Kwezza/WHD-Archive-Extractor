@@ -56,7 +56,7 @@ char *input_file_path;
 char *output_file_path;
 char single_error_message[MAX_ERROR_LENGTH];
 char error_messages_array[MAX_ERRORS][MAX_ERROR_LENGTH];
-char version_number[] = "1.1.0";
+char version_number[] = "1.1.1";
 int  num_archives_found;
 int  error_count = 0;
 int  num_directories_scanned;
