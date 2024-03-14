@@ -11,7 +11,8 @@
             <li>Extracting only new or updated files to avoid unnecessary duplication</li>
         </ul>
             <h2>Prerequisites</h2>
-            <ul>To use this program, ensure the following software is installed in the C: directory<br/>
+            To use this program, ensure the following software is installed in the C: directory<br/>
+            <ul>
                 <li>LHA: can be downloaded from <a href="https://aminet.net/package/util/arc/lha">aminet.net/package/util/arc/lha</a>.</li>
                 <li>LZX: required for a small number of archives, and this can be downloaded from <a href="https://aminet.net/package/util/arc/lzx121r1">aminet.net/package/util/arc/lzx121r1</a>.</li>
             </ul>
