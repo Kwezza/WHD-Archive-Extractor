@@ -10,20 +10,26 @@
 
   Key features of this program include:
 
-  * Scanning input folders and subfolders for LHA archives
+  * Scanning input folders and subfolders for LHA and LZX archives
   * Extracting the archives using the LHA program to an output folder
   * Preserving the subfolder structure from the input folder during
     extraction
   * Extracting only new or updated files to avoid unnecessary duplication
 
   To use this program, ensure the LHA software is installed in the C:
-  directory. You can download it from aminet.net/package/util/arc/lha.
-  unlzx is also supported for LZX archives, and can be downloaded from
-  aminet.net/package/util/arc/lzx121r1
+  directory. You can download it from aminet.net/package/util/arc/lha
 
-  Created 02/04/2023 and compiled on the PC using VBCC.
+  v1.0.0 - 2023-04-02 - First version released.
+
+  v1.1.0 - 2024-03-14 - Added support for LZX archives.  Download from
+                        aminet.net/package/util/arc/lzx121r1
+                      - Improved error handling.
+                      - If the target folder already exists, it
+                        will now be scanned for protected files and the
+                        protection bits will be removed.  This is to allow
+                        the extraction to replace the files.
+
   This program is released under the MIT License.
-
 */
 
 #include <ctype.h>
@@ -51,12 +57,12 @@ char *output_file_path;
 char single_error_message[MAX_ERROR_LENGTH];
 char error_messages_array[MAX_ERRORS][MAX_ERROR_LENGTH];
 char version_number[] = "1.1.0";
-int num_archives_found;
-int error_count = 0;
-int num_directories_scanned;
-int should_stop_app = 0; /* used to stop the app if the lha extraction fails */
+int  num_archives_found;
+int  error_count = 0;
+int  num_directories_scanned;
+int  should_stop_app = 0; /* used to stop the app if the lha extraction fails */
 long start_time;
-int resetProtectionBits = 1;
+int  resetProtectionBits = 1;
 
 STRPTR input_directory_path;
 STRPTR output_directory_path;
@@ -64,78 +70,77 @@ STRPTR output_directory_path;
 /* Function prototypes */
 char *get_file_path(const char *full_path);
 char *remove_text(char *input_str, STRPTR text_to_remove);
-int check_disk_space(STRPTR path, int min_space_mb);
-int does_file_exist(char *filename);
-int does_folder_exists(const char *folder_name);
-int ends_with_lha(const char *filename);
-void sanitizeAmigaPath(char *path);
-void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path);
-void logError(const char *errorMessage);
-void printErrors(void);
-void remove_trailing_slash(char *str);
+int   check_disk_space(STRPTR path, int min_space_mb);
+int   does_file_exist(char *filename);
+int   does_folder_exists(const char *folder_name);
+int   ends_with_lha(const char *filename);
+void  sanitizeAmigaPath(char *path);
+void  get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path);
+void  logError(const char *errorMessage);
+void  printErrors(void);
+void  remove_trailing_slash(char *str);
 char *findFirstDirectory(char *filePath);
+char *get_file_extension(const char *filename, char *outputBuffer);
 
 int num_lzx_archives_found = 0;
 int num_lha_archives_found = 0;
-
-
-/*
- * Sanitizes an Amiga file path in-place by removing or replacing specific invalid character sequences.
- * Assumes the input buffer is large enough for the sanitized path.
- * It replaces "//" with "/", ":/" with ":", and removes consecutive colons.
- * Parameters:
- *     char *path - Pointer to the original file path string to be modified in place.
- */
 
 /*
  * Function to sanitize an Amiga file path in-place by correcting specific path issues.
  * It ensures no slashes immediately follow a colon, replaces "//" with "/", and removes consecutive colons.
  * Assumes the input buffer is large enough for the sanitized path.
  */
-void sanitizeAmigaPath(char *path) {
-    ULONG len;
-    char *sanitizedPath;
-    int i, j;
+void sanitizeAmigaPath(char *path)
+{
+  ULONG len;
+  char *sanitizedPath;
+  int i, j;
 
-    if (path == NULL) {
-        return;
+  if (path == NULL)
+  {
+    return;
+  }
+
+  len = strlen(path) + 1; /* Include null terminator*/
+  sanitizedPath = (char *)AllocVec(len, MEMF_ANY | MEMF_CLEAR);
+  if (sanitizedPath == NULL)
+  {
+    /* Memory allocation failed */
+    return;
+  }
+
+  i = 0;
+  j = 0;
+  while (path[i] != '\0')
+  {
+    if (path[i] == ':')
+    {
+      /* Copy the colon */
+      sanitizedPath[j++] = path[i++];
+      /* Skip all following slashes */
+      while (path[i] == '/')
+      {
+        i++;
+      }
     }
-
-    len = strlen(path) + 1; // Include null terminator
-    sanitizedPath = (char *)AllocVec(len, MEMF_ANY | MEMF_CLEAR);
-    if (sanitizedPath == NULL) {
-        // Memory allocation failed
-        return;
+    else if (path[i] == '/' && path[i + 1] == '/')
+    {
+      /* Skip redundant slashes */
+      i++;
     }
-
-    i = 0;
-    j = 0;
-    while (path[i] != '\0') {
-        if (path[i] == ':') {
-            // Copy the colon
-            sanitizedPath[j++] = path[i++];
-            // Skip all following slashes
-            while (path[i] == '/') {
-                i++;
-            }
-        } else if (path[i] == '/' && path[i + 1] == '/') {
-            // Skip redundant slashes
-            i++;
-        } else {
-            // Copy other characters
-            sanitizedPath[j++] = path[i++];
-        }
+    else
+    {
+      /* Copy other characters */
+      sanitizedPath[j++] = path[i++];
     }
+  }
 
-    sanitizedPath[j] = '\0'; // Ensure the result is null-terminated
+  sanitizedPath[j] = '\0'; /* Ensure the result is null-terminated */
 
-    // Copy back to the original path and free the allocated memory
-    strcpy(path, sanitizedPath);
-    FreeVec(sanitizedPath);
+  /* Copy back to the original path and free the allocated memory */
+  strcpy(path, sanitizedPath);
+  FreeVec(sanitizedPath);
 }
-
-
-
 
 char *remove_text(char *input_str, STRPTR text_to_remove)
 {
@@ -159,30 +164,36 @@ int ends_with_lha(const char *filename)
   return len > 4 && strcmp(filename + len - 4, ".lha") == 0;
 }
 
-char *get_file_extension(const char *filename)
+/*
+ * Extracts the file extension from a given filename and converts it to uppercase.
+ * Assumes the extension is exactly 4 characters long, including the dot.
+ *
+ * Parameters:
+ *     filename - the name of the file from which to extract the extension.
+ *     outputBuffer - a buffer to hold the uppercase extension, must be at least 5 characters long.
+ *
+ * Returns:
+ *     A pointer to the outputBuffer containing the uppercase extension, or NULL if the operation fails.
+ */
+char *get_file_extension(const char *filename, char *outputBuffer)
 {
   const char *extensionStart;
-  char *uppercaseExtension;
-  int i = 0;
+  int i;
   size_t len = strlen(filename);
-  if (len < 4)
+
+  if (len < 4 || outputBuffer == NULL)
   {
-    return NULL; /* Return NULL if the string is too short */
+    return NULL; /* Return NULL if the string is too short or outputBuffer is NULL */
   }
 
   extensionStart = filename + len - 4;
-  uppercaseExtension = malloc(5 * sizeof(char)); /* 4 characters + null terminator */
-  if (!uppercaseExtension)
-  {
-    return NULL; /* Return NULL if memory allocation fails */
-  }
   for (i = 0; i < 4; i++)
   {
-    uppercaseExtension[i] = toupper(extensionStart[i]);
+    outputBuffer[i] = toupper((unsigned char)extensionStart[i]);
   }
-  uppercaseExtension[4] = '\0';
+  outputBuffer[4] = '\0';
 
-  return uppercaseExtension;
+  return outputBuffer;
 }
 
 char *get_file_path(const char *full_path)
@@ -316,7 +327,7 @@ char *findFirstDirectory(char *filePath)
 void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path)
 {
   BPTR dir_lock;
-  char *file_extension;
+  char file_extension[5];
   char current_file_path[256];
   char ExtractCommand[20];
   char extraction_command[256];
@@ -347,7 +358,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
             strcat(current_file_path, file_info_block->fib_FileName);
             sanitizeAmigaPath(current_file_path);
 
-
             if (file_info_block->fib_DirEntryType > 0)
             {
               num_directories_scanned++;
@@ -356,16 +366,13 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
             }
             else
             {
+              get_file_extension(file_info_block->fib_FileName, file_extension);
 
-              //printf("current_file_path: %s\n", current_file_path);
-              //printf("input_file_path: %s\n", input_file_path);
-              file_extension = get_file_extension(file_info_block->fib_FileName);
-              //printf("File extension: %s\n", file_extension);
               if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
               {
                 sprintf(fileCommandStore, "%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
                 sanitizeAmigaPath(fileCommandStore);
-                printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n",file_info_block->fib_FileName, fileCommandStore);
+                printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
                 if (strcmp(file_extension, ".LHA") == 0)
                 {
                   num_lha_archives_found++;
@@ -389,7 +396,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                       {
                         sprintf(fileCommandStore, "%s/%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
                         sanitizeAmigaPath(fileCommandStore);
-                        if (does_folder_exists(fileCommandStore) ==1)
+                        if (does_folder_exists(fileCommandStore) == 1)
                         {
                           sprintf(fileCommandStore, "protect %s/%s/%s/#? ALL rwed >NIL:", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
                           sanitizeAmigaPath(fileCommandStore);
@@ -421,14 +428,12 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   }
                 }
 
-                //printf("Target path: %s\n", get_file_path(remove_text(current_file_path, input_file_path)));
+                
                 /* Check for disk space before extracting */
-                // printf("Skip disk space check: %d\n", skip_disk_space_check);
                 should_stop_app = 0;
                 if (skip_disk_space_check == false)
                 {
                   int disk_check_result = check_disk_space(output_directory_path, 20);
-                  // printf("Disk check result: %d\n", disk_check_result);
                   if (disk_check_result < 0)
                   {
                     /* To do: handle various error cases based
@@ -451,17 +456,11 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                    * path, and output path */
                   sprintf(extraction_command, "%s %s \"%s\" \"%s/%s\"", program_name, ExtractCommand, current_file_path, output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
                   sanitizeAmigaPath(extraction_command);
-                  printf("ExtractCommand: %s\n", ExtractCommand);
-                  //
-
-                  printf("Full command: %s\n", extraction_command);
 
                   /* Execute the command*/
-
                   command_result = SystemTagList(extraction_command, NULL);
 
                   /* Check for error */
-
                   if (command_result != 0)
                   {
                     if (command_result == 10)
@@ -616,17 +615,12 @@ int main(int argc, char *argv[])
   {
     printf(
         "\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
-        "<output_directory_path> [-enablespacecheck] [-testarchivesonly]\n\n");
+        "<output_directory_path> [-enablespacecheck (experimental)] \n\n");
     return 1;
   }
 
   input_directory_path = argv[1];
   output_directory_path = argv[2];
-
-#ifdef DEBUG
-  // input_directory_path = "WHD:";
-  // output_directory_path = "PC:WHDTarget";
-#endif
 
   skip_disk_space_check = true;
   for (i = 4; i < argc; i++)
