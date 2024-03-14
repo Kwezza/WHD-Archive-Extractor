@@ -605,9 +605,9 @@ int main(int argc, char *argv[])
   if (!does_file_exist("c:unlzx"))
   {
     printf(
-        "File c:unlzx does not exist. There are a few LZX compressed"
-        "archives for WHDLoad.  This program will continue and ignore these"
-        "archives until UnLZX is installed.  Please install the latest version"
+        "File c:unlzx does not exist. There are a few LZX compressed "
+        "archives for WHDLoad.  This program will continue and ignore these "
+        "archives until UnLZX is installed.  Please install the latest version "
         "of UnLZX2.lha from www.aminet.org\n");
   }
 
