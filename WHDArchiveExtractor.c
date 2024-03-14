@@ -588,10 +588,10 @@ int main(int argc, char *argv[])
   printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", version_number);
 
   printf(
-      "\x1B[32mThis program is designed to automatically locate LHA and "
-      "LZX archive files within\nnested subdirectories, extract their contents "
-      "to a specified destination, \nand preserve the original directory "
-      "hierarchy in which the archives\nwere located.\x1B[0m \n\n");
+      "\x1B[32mThis program is designed to automatically locate "
+      "LHA and LZX archive files\nwithin nested subdirectories, "
+      "extract their contents to a specified\nadestination, and preserve the original directory "
+      "hierarchy in which the \narchiveswere located.\x1B[0m \n\n");
 
   if (!does_file_exist("c:lha"))
   {
