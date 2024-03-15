@@ -588,10 +588,10 @@ int main(int argc, char *argv[])
   printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", version_number);
 
   printf(
-      "\x1B[32mThis program is designed to automatically locate LHA and "
-      "LZX archive files within\nnested subdirectories, extract their contents "
-      "to a specified destination, \nand preserve the original directory "
-      "hierarchy in which the archives\nwere located.\x1B[0m \n\n");
+      "\x1B[32mThis program is designed to automatically locate "
+      "LHA and LZX archive files\nwithin nested subdirectories, "
+      "extract their contents to a specified\ndestination, and preserve the original directory "
+      "hierarchy in which the \narchives were located.\x1B[0m \n\n");
 
   if (!does_file_exist("c:lha"))
   {
@@ -605,9 +605,9 @@ int main(int argc, char *argv[])
   if (!does_file_exist("c:unlzx"))
   {
     printf(
-        "File c:unlzx does not exist. There are a few LZX compressed"
-        "archives for WHDLoad.  This program will continue and ignore these"
-        "archives until UnLZX is installed.  Please install the latest version"
+        "File c:unlzx does not exist. There are a few LZX compressed "
+        "archives for WHDLoad.  This program will continue and ignore these "
+        "archives until UnLZX is installed.  Please install the latest version "
         "of UnLZX2.lha from www.aminet.org\n");
   }
 
