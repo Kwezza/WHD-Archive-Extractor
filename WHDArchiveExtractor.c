@@ -590,8 +590,8 @@ int main(int argc, char *argv[])
   printf(
       "\x1B[32mThis program is designed to automatically locate "
       "LHA and LZX archive files\nwithin nested subdirectories, "
-      "extract their contents to a specified\nadestination, and preserve the original directory "
-      "hierarchy in which the \narchiveswere located.\x1B[0m \n\n");
+      "extract their contents to a specified\ndestination, and preserve the original directory "
+      "hierarchy in which the \narchives were located.\x1B[0m \n\n");
 
   if (!does_file_exist("c:lha"))
   {
