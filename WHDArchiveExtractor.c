@@ -28,6 +28,12 @@
                         will now be scanned for protected files and the
                         protection bits will be removed.  This is to allow
                         the extraction to replace the files.
+  
+  v1.1.1 - 2024-03-15 - Fixed some typos and text alignment issues
+
+  v1.2.b1- 2025-05-06 - Added support for UnLZX 2.16 and LZX 1.21.
+                        Both of the LZX extracters use different
+                        commands and these are supported
 
   This program is released under the MIT License.
 */
@@ -56,13 +62,16 @@ char *input_file_path;
 char *output_file_path;
 char single_error_message[MAX_ERROR_LENGTH];
 char error_messages_array[MAX_ERRORS][MAX_ERROR_LENGTH];
-char version_number[] = "1.1.0";
+char version_number[] = "1.2.beta1";
 int  num_archives_found;
 int  error_count = 0;
 int  num_directories_scanned;
 int  should_stop_app = 0; /* used to stop the app if the lha extraction fails */
 long start_time;
 int  resetProtectionBits = 1;
+char lzxExtractCommand[9];  
+char lzxExtractTargetCommand[4];
+
 
 STRPTR input_directory_path;
 STRPTR output_directory_path;
@@ -73,7 +82,7 @@ char *remove_text(char *input_str, STRPTR text_to_remove);
 int   check_disk_space(STRPTR path, int min_space_mb);
 int   does_file_exist(char *filename);
 int   does_folder_exists(const char *folder_name);
-int   ends_with_lha(const char *filename);
+
 void  sanitizeAmigaPath(char *path);
 void  get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path);
 void  logError(const char *errorMessage);
@@ -81,6 +90,7 @@ void  printErrors(void);
 void  remove_trailing_slash(char *str);
 char *findFirstDirectory(char *filePath);
 char *get_file_extension(const char *filename, char *outputBuffer);
+char *GetExecutableVersion(const char *filePath);
 
 int num_lzx_archives_found = 0;
 int num_lha_archives_found = 0;
@@ -158,11 +168,7 @@ char *remove_text(char *input_str, STRPTR text_to_remove)
   return input_str;
 }
 
-int ends_with_lha(const char *filename)
-{
-  size_t len = strlen(filename);
-  return len > 4 && strcmp(filename + len - 4, ".lha") == 0;
-}
+
 
 /*
  * Extracts the file extension from a given filename and converts it to uppercase.
@@ -331,6 +337,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   char current_file_path[256];
   char ExtractCommand[20];
   char extraction_command[256];
+  char ExtractTargetCommand[4];
   char *directoryName;
   char program_name[6];
   char fileCommandStore[256];
@@ -376,6 +383,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 if (strcmp(file_extension, ".LHA") == 0)
                 {
                   num_lha_archives_found++;
+                  strcpy(ExtractTargetCommand, "  \0");
                   strcpy(program_name, "lha");
                   if (test_archives_only)
                   {
@@ -417,6 +425,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 else
                 {
                   num_lzx_archives_found++;
+                  strcpy(ExtractTargetCommand, lzxExtractTargetCommand);
                   strcpy(program_name, "unlzx");
                   if (test_archives_only)
                   {
@@ -424,7 +433,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   }
                   else
                   {
-                    strcpy(ExtractCommand, "-x\0");
+                    strcpy(ExtractCommand, lzxExtractCommand);
                   }
                 }
 
@@ -454,8 +463,10 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
 
                   /* Combine the extraction command, source
                    * path, and output path */
-                  sprintf(extraction_command, "%s %s \"%s\" \"%s/%s\"", program_name, ExtractCommand, current_file_path, output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
+                  sprintf(extraction_command, "%s %s \"%s\" %s \"%s/%s\"", program_name, ExtractCommand, current_file_path,ExtractTargetCommand, output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
                   sanitizeAmigaPath(extraction_command);
+
+
 
                   /* Execute the command*/
                   command_result = SystemTagList(extraction_command, NULL);
@@ -578,6 +589,7 @@ int main(int argc, char *argv[])
 {
   int i, disk_check_result;
   long elapsed_seconds, hours, minutes, seconds;
+  char *versionInfo;
 
   /* Black text:  printf("\x1B[30m 30:\x1B[0m \n"); */
   /* White text:  printf("\x1B[31m 31:\x1B[0m \n"); */
@@ -602,6 +614,7 @@ int main(int argc, char *argv[])
     return 0;
   }
 
+
   if (!does_file_exist("c:unlzx"))
   {
     printf(
@@ -609,6 +622,33 @@ int main(int argc, char *argv[])
         "archives for WHDLoad.  This program will continue and ignore these "
         "archives until UnLZX is installed.  Please install the latest version "
         "of UnLZX2.lha from www.aminet.org\n");
+
+  }
+  else
+  {
+    versionInfo = GetExecutableVersion("c:unlzx");
+    //printf("UnLZX version: %s", versionInfo);
+    
+    if (strcmp(versionInfo, "UnLZX 2.16") == 0)
+    {
+      strcpy(lzxExtractCommand, "-x");
+      strcpy(lzxExtractTargetCommand, "-o");
+      printf("UnLZX version recognised as UnLZX 2.16.\n");
+    }
+    else if (strcmp(versionInfo, "LZX 1.21") == 0)
+    {
+      strcpy(lzxExtractCommand, "-q -x e");
+      strcpy(lzxExtractTargetCommand, "  ");
+      printf("UnLZX version recognised as LZX 1.21 \n");
+    }
+    else
+    {
+      /* default to " e" for now */
+      strcpy(lzxExtractCommand, " e");
+      printf("Unknown UnLZX version.  defaulting extraction command to %s\n", lzxExtractCommand);
+    }
+    
+    FreeVec(versionInfo);
   }
 
   if (argc < 2)
@@ -704,3 +744,46 @@ int main(int argc, char *argv[])
   printf("\nWHDArchiveExtractor V%s\n\n", version_number);
   return 0;
 }
+
+char *GetExecutableVersion(const char *filePath)
+{
+    char command[256];
+    char *versionBuffer = NULL;
+    FILE *versionFile;
+    char line[256];
+    int len;
+
+    /* Create and execute the version command */
+    sprintf(command, "version %s >ram:v.txt", filePath);
+    SystemTagList(command, NULL);
+
+    /* Open the version file */
+    versionFile = fopen("ram:v.txt", "r");
+    if (versionFile != NULL)
+    {
+        /* Read the first line */
+        if (fgets(line, sizeof(line), versionFile) != NULL)
+        {
+            /* Remove trailing whitespace */
+            len = strlen(line);
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' || line[len-1] == ' '))
+            {
+                line[--len] = '\0';
+            }
+
+            /* Allocate memory for the version string */
+            versionBuffer = AllocVec(len + 1, MEMF_CLEAR);
+            if (versionBuffer != NULL)
+            {
+                strcpy(versionBuffer, line);
+            }
+        }
+        fclose(versionFile);
+    }
+
+    /* Delete the temporary file */
+    DeleteFile("ram:v.txt");
+
+    return versionBuffer;
+}
+
