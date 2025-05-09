@@ -396,7 +396,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                     if (resetProtectionBits == 1)
                     {
 
-                      sprintf(extraction_command, "lha vq \"%s\" >ram:listing.txt", current_file_path);
+                      sprintf(extraction_command, "c:lha vq \"%s\" >ram:listing.txt", current_file_path);
                       sanitizeAmigaPath(extraction_command);
                       SystemTagList(extraction_command, NULL);
                       directoryName = findFirstDirectory("ram:listing.txt");
@@ -426,7 +426,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 {
                   num_lzx_archives_found++;
                   strcpy(ExtractTargetCommand, lzxExtractTargetCommand);
-                  strcpy(program_name, "unlzx");
+                  strcpy(program_name, "c:unlzx");
                   if (test_archives_only)
                   {
                     strcpy(ExtractCommand, "-v\0");
