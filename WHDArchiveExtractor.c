@@ -35,6 +35,11 @@
                         Both of the LZX extracters use different
                         commands and these are supported
 
+  v1.2.1 - 2025-05-09 - Fixed some buffer overflow issues and a memory leak.
+                        Upgrading to this version is recommended.
+                      - Added a version cookie for the dos "version"
+                        command.
+
   This program is released under the MIT License.
 */
 
@@ -49,6 +54,8 @@
 #include <string.h>
 #include <time.h>
 
+
+
 #define bool int
 #define true 1
 #define false 0
@@ -57,23 +64,30 @@
 #define DEBUG 1
 #define BUFFER_SIZE 1024
 
+
+#define PROGRAM_NAME "WHD Archive Extractor"
+#define VERSION_STRING "1.2.1"
+#define VERSION_DATE "09.05.2025"
+
 bool skip_disk_space_check = false, test_archives_only = false;
 char *input_file_path;
 char *output_file_path;
 char single_error_message[MAX_ERROR_LENGTH];
 char error_messages_array[MAX_ERRORS][MAX_ERROR_LENGTH];
-char version_number[] = "1.2.beta1";
+
 int  num_archives_found;
 int  error_count = 0;
 int  num_directories_scanned;
 int  should_stop_app = 0; /* used to stop the app if the lha extraction fails */
 long start_time;
-int  resetProtectionBits = 1;
-char lzxExtractCommand[9];  
-char lzxExtractTargetCommand[4];
+int  reset_protection_bits = 1;
+char lzx_extract_command[9];  
+char lzx_extract_target_command[4];
+const char *version = "$VER: " PROGRAM_NAME " " VERSION_STRING " (" VERSION_DATE ") compiled " __DATE__ " " __TIME__ "";
 
 
 STRPTR input_directory_path;
+
 STRPTR output_directory_path;
 
 /* Function prototypes */
@@ -83,24 +97,34 @@ int   check_disk_space(STRPTR path, int min_space_mb);
 int   does_file_exist(char *filename);
 int   does_folder_exists(const char *folder_name);
 
-void  sanitizeAmigaPath(char *path);
+void  sanitize_amiga_path(char *path);
 void  get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path);
-void  logError(const char *errorMessage);
-void  printErrors(void);
+void  log_error(const char *errorMessage);
+void  print_errors(void);
 void  remove_trailing_slash(char *str);
-char *findFirstDirectory(char *filePath);
+char *find_first_directory(char *filePath);
 char *get_file_extension(const char *filename, char *outputBuffer);
-char *GetExecutableVersion(const char *filePath);
+char *get_executable_version(const char *filePath);
 
 int num_lzx_archives_found = 0;
 int num_lha_archives_found = 0;
 
-/*
- * Function to sanitize an Amiga file path in-place by correcting specific path issues.
- * It ensures no slashes immediately follow a colon, replaces "//" with "/", and removes consecutive colons.
- * Assumes the input buffer is large enough for the sanitized path.
+
+
+/**
+ * @brief Sanitizes an Amiga file path in-place by correcting specific path issues.
+ *
+ * This function modifies the given path string to:
+ * - Remove any slashes ('/') that immediately follow a colon (':').
+ * - Replace double slashes ('//') with a single slash ('/').
+ * - Ensure the result is null-terminated.
+ *
+ * The function assumes the input buffer is large enough to hold the sanitized path.
+ * The sanitization is performed in-place, but a temporary buffer is used internally.
+ *
+ * @param path The file path string to sanitize. Must be a writable, null-terminated string.
  */
-void sanitizeAmigaPath(char *path)
+void sanitize_amiga_path(char *path)
 {
   ULONG len;
   char *sanitizedPath;
@@ -152,6 +176,17 @@ void sanitizeAmigaPath(char *path)
   FreeVec(sanitizedPath);
 }
 
+/**
+ * @brief Removes a specified prefix from the beginning of a string, if present.
+ *
+ * Checks if the string @p text_to_remove appears at the start of @p input_str.
+ * If so, returns a pointer to the character in @p input_str immediately after the prefix.
+ * If not, returns the original @p input_str pointer.
+ *
+ * @param input_str The input string to check and potentially modify.
+ * @param text_to_remove The prefix to remove from the start of @p input_str.
+ * @return A pointer to the resulting string (either after the prefix, or the original string if the prefix is not present).
+ */
 char *remove_text(char *input_str, STRPTR text_to_remove)
 {
   int remove_len = strlen(text_to_remove);
@@ -170,16 +205,14 @@ char *remove_text(char *input_str, STRPTR text_to_remove)
 
 
 
-/*
- * Extracts the file extension from a given filename and converts it to uppercase.
+/**
+ * @brief Extracts the file extension from a given filename and converts it to uppercase.
+ *
  * Assumes the extension is exactly 4 characters long, including the dot.
  *
- * Parameters:
- *     filename - the name of the file from which to extract the extension.
- *     outputBuffer - a buffer to hold the uppercase extension, must be at least 5 characters long.
- *
- * Returns:
- *     A pointer to the outputBuffer containing the uppercase extension, or NULL if the operation fails.
+ * @param filename The name of the file from which to extract the extension.
+ * @param outputBuffer A buffer to hold the uppercase extension, must be at least 5 characters long.
+ * @return A pointer to the outputBuffer containing the uppercase extension, or NULL if the operation fails.
  */
 char *get_file_extension(const char *filename, char *outputBuffer)
 {
@@ -217,7 +250,8 @@ char *get_file_path(const char *full_path)
     size_t file_path_length = last_path_separator - full_path + 1;
 
     /* Allocate memory for the file path string */
-    file_path = malloc(file_path_length + 1);
+    /* old version: file_path = malloc(file_path_length + 1);*/
+    file_path = (char *)AllocVec(file_path_length + 1, MEMF_CLEAR);
 
     if (file_path != NULL)
     {
@@ -230,6 +264,14 @@ char *get_file_path(const char *full_path)
   return file_path;
 }
 
+/**
+ * @brief Checks if a file exists by attempting to open it for reading.
+ *
+ * Tries to open the specified file in read mode. If successful, the file exists.
+ *
+ * @param filename The name (and path) of the file to check.
+ * @return 1 if the file exists, 0 otherwise.
+ */
 int does_file_exist(char *filename)
 {
   FILE *file;
@@ -247,6 +289,14 @@ int does_file_exist(char *filename)
   }
 }
 
+/**
+ * @brief Checks if a folder (directory) exists.
+ *
+ * Attempts to lock the specified folder for reading. If successful, the folder exists.
+ *
+ * @param folder_name The name (and path) of the folder to check.
+ * @return 1 if the folder exists, 0 otherwise.
+ */
 int does_folder_exists(const char *folder_name)
 {
   BPTR lock = Lock((CONST_STRPTR)folder_name, ACCESS_READ);
@@ -261,6 +311,13 @@ int does_folder_exists(const char *folder_name)
   }
 }
 
+/**
+ * @brief Removes a trailing slash from a string, if present.
+ *
+ * Modifies the input string in-place to remove a trailing '/' character, if it exists.
+ *
+ * @param str The string to modify. Must be a writable, null-terminated string.
+ */
 void remove_trailing_slash(char *str)
 {
   if (str != NULL && strlen(str) > 0 && str[strlen(str) - 1] == '/')
@@ -269,14 +326,27 @@ void remove_trailing_slash(char *str)
   }
 }
 
-void logError(const char *errorMessage)
+/**
+ * @brief Logs an error message to the error message array.
+ *
+ * Copies the provided error message into the global error message array and increments the error count.
+ * Ensures the message is null-terminated and does not exceed the maximum allowed length.
+ *
+ * @param errorMessage The error message to log.
+ */
+void log_error(const char *errorMessage)
 {
   strncpy(error_messages_array[error_count], errorMessage, MAX_ERROR_LENGTH);
   error_messages_array[error_count][MAX_ERROR_LENGTH - 1] = '\0'; /* Ensure null-termination */
   error_count++;
 }
 
-void printErrors()
+/**
+ * @brief Prints all logged error messages to the console.
+ *
+ * If any errors have been logged, prints them in a formatted list. Otherwise, prints a message indicating no errors.
+ */
+void print_errors()
 {
   int i;
   if (error_count > 0)
@@ -293,7 +363,7 @@ void printErrors()
   }
 }
 
-char *findFirstDirectory(char *filePath)
+char *find_first_directory(char *filePath)
 {
   static char directoryName[256]; /* Static buffer to hold the directory name */
   FILE *file;
@@ -342,9 +412,10 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   char program_name[6];
   char fileCommandStore[256];
   LONG command_result;
-
+  char *file_path_tmp = NULL;
+  size_t needed = 0;
   struct FileInfoBlock *file_info_block;
-  resetProtectionBits = 1;
+  reset_protection_bits = 1;
 
   printf("Scanning directory: %s\n", input_directory_path);
 
@@ -360,10 +431,20 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
         {
           if (strcmp(file_info_block->fib_FileName, ".") != 0 && strcmp(file_info_block->fib_FileName, "..") != 0)
           {
-            strcpy(current_file_path, input_directory_path);
-            strcat(current_file_path, "/");
-            strcat(current_file_path, file_info_block->fib_FileName);
-            sanitizeAmigaPath(current_file_path);
+            num_directories_scanned++;
+
+            /* Safe construction of current_file_path */
+            needed = strlen(input_directory_path) + 1 + strlen(file_info_block->fib_FileName) + 1;
+            if (needed <= sizeof(current_file_path)) {
+                strcpy(current_file_path, input_directory_path);
+                strcat(current_file_path, "/");
+                strcat(current_file_path, file_info_block->fib_FileName);
+            } else {
+                printf("Error: Path too long for current_file_path buffer.\n");
+                log_error("Path too long for current_file_path buffer.");
+                continue;
+            }
+            sanitize_amiga_path(current_file_path);
 
             if (file_info_block->fib_DirEntryType > 0)
             {
@@ -377,9 +458,28 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
 
               if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
               {
-                sprintf(fileCommandStore, "%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
-                sanitizeAmigaPath(fileCommandStore);
+                file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
+                if (file_path_tmp) {
+                    needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1;
+                    if (needed <= sizeof(fileCommandStore)) {
+                        strcpy(fileCommandStore, output_directory_path);
+                        strcat(fileCommandStore, "/");
+                        strcat(fileCommandStore, file_path_tmp);
+                    } else {
+                        printf("Error: Path too long for fileCommandStore buffer.\n");
+                        log_error("Path too long for fileCommandStore buffer.");
+                        FreeVec(file_path_tmp);
+                        file_path_tmp = NULL;
+                        continue;
+                    }
+                } else {
+                    printf("Error: get_file_path returned NULL.\n");
+                    continue;
+                }
+                sanitize_amiga_path(fileCommandStore);
                 printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
+                FreeVec(file_path_tmp);
+                file_path_tmp = NULL;
                 if (strcmp(file_extension, ".LHA") == 0)
                 {
                   num_lha_archives_found++;
@@ -393,24 +493,73 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   {
                     strcpy(ExtractCommand, "-T -M -N -m x\0");
 
-                    if (resetProtectionBits == 1)
+                    if (reset_protection_bits == 1)
                     {
 
                       sprintf(extraction_command, "c:lha vq \"%s\" >ram:listing.txt", current_file_path);
-                      sanitizeAmigaPath(extraction_command);
+                      sanitize_amiga_path(extraction_command);
                       SystemTagList(extraction_command, NULL);
-                      directoryName = findFirstDirectory("ram:listing.txt");
+                      directoryName = find_first_directory("ram:listing.txt");
                       if (directoryName != NULL)
                       {
-                        sprintf(fileCommandStore, "%s/%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
-                        sanitizeAmigaPath(fileCommandStore);
+                        file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
+                        if (file_path_tmp) {
+                            needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1 + strlen(directoryName) + 1;
+                            if (needed <= sizeof(fileCommandStore)) {
+                                strcpy(fileCommandStore, output_directory_path);
+                                strcat(fileCommandStore, "/");
+                                strcat(fileCommandStore, file_path_tmp);
+                                strcat(fileCommandStore, "/");
+                                strcat(fileCommandStore, directoryName);
+                            } else {
+                                printf("Error: Path too long for fileCommandStore buffer.\n");
+                                log_error("Path too long for fileCommandStore buffer.");
+                                FreeVec(file_path_tmp);
+                                file_path_tmp = NULL;
+                                continue;
+                            }
+                        } else {
+                            printf("Error: get_file_path returned NULL.\n");
+                            continue;
+                        }
+                        if (directoryName && strlen(fileCommandStore) + 1 < sizeof(fileCommandStore)) {
+                          strncat(fileCommandStore, "/", sizeof(fileCommandStore) - strlen(fileCommandStore) - 1);
+                        }
+                        if (directoryName && strlen(fileCommandStore) + strlen(directoryName) < sizeof(fileCommandStore)) {
+                          strncat(fileCommandStore, directoryName, sizeof(fileCommandStore) - strlen(fileCommandStore) - 1);
+                        }
+                        sanitize_amiga_path(fileCommandStore);
                         if (does_folder_exists(fileCommandStore) == 1)
                         {
-                          sprintf(fileCommandStore, "protect %s/%s/%s/#? ALL rwed >NIL:", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
-                          sanitizeAmigaPath(fileCommandStore);
+                          file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
+                          if (file_path_tmp) {
+                              needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1 + strlen(directoryName) + strlen("/#? ALL rwed >NIL:") + 1;
+                              if (needed <= sizeof(fileCommandStore)) {
+                                  strcpy(fileCommandStore, output_directory_path);
+                                  strcat(fileCommandStore, "/");
+                                  strcat(fileCommandStore, file_path_tmp);
+                                  strcat(fileCommandStore, "/");
+                                  strcat(fileCommandStore, directoryName);
+                                  strcat(fileCommandStore, "/#? ALL rwed >NIL:");
+                              } else {
+                                  printf("Error: Path too long for fileCommandStore buffer (protect).\n");
+                                  log_error("Error: Path too long for extraction_command buffer.");
+                                  FreeVec(file_path_tmp);
+                                  file_path_tmp = NULL;
+                                  continue;
+                              }
+                          } else {
+                              printf("Error: get_file_path returned NULL.\n");
+                              continue;
+                          }
+                          sanitize_amiga_path(fileCommandStore);
                           printf("Prepping any protected files for potential replacement...\n");
                           SystemTagList(fileCommandStore, NULL);
+                          FreeVec(file_path_tmp);
+                          file_path_tmp = NULL;
                         }
+                        FreeVec(file_path_tmp);
+                        file_path_tmp = NULL;
                       }
                       else
                       {
@@ -425,7 +574,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 else
                 {
                   num_lzx_archives_found++;
-                  strcpy(ExtractTargetCommand, lzxExtractTargetCommand);
+                  strcpy(ExtractTargetCommand, lzx_extract_target_command);
                   strcpy(program_name, "c:unlzx");
                   if (test_archives_only)
                   {
@@ -433,7 +582,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   }
                   else
                   {
-                    strcpy(ExtractCommand, lzxExtractCommand);
+                    strcpy(ExtractCommand, lzx_extract_command);
                   }
                 }
 
@@ -463,8 +612,36 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
 
                   /* Combine the extraction command, source
                    * path, and output path */
-                  sprintf(extraction_command, "%s %s \"%s\" %s \"%s/%s\"", program_name, ExtractCommand, current_file_path,ExtractTargetCommand, output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
-                  sanitizeAmigaPath(extraction_command);
+                  file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
+                  if (file_path_tmp) {
+                      needed = strlen(program_name) + 1 + strlen(ExtractCommand) + 3 + strlen(current_file_path) + 3 + strlen(ExtractTargetCommand) + 3 + strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 2 + 1;
+                      if (needed <= sizeof(extraction_command)) {
+                          strcpy(extraction_command, program_name);
+                          strcat(extraction_command, " ");
+                          strcat(extraction_command, ExtractCommand);
+                          strcat(extraction_command, " \"");
+                          strcat(extraction_command, current_file_path);
+                          strcat(extraction_command, "\" ");
+                          strcat(extraction_command, ExtractTargetCommand);
+                          strcat(extraction_command, " \"");
+                          strcat(extraction_command, output_directory_path);
+                          strcat(extraction_command, "/");
+                          strcat(extraction_command, file_path_tmp);
+                          strcat(extraction_command, "\"");
+                      } else {
+                          printf("Error: Path too long for extraction_command buffer.\n");
+                          log_error("Error: Path too long for extraction_command buffer.");
+                          FreeVec(file_path_tmp);
+                          file_path_tmp = NULL;
+                          continue;
+                      }
+                  } else {
+                      printf("Error: get_file_path returned NULL.\n");
+                      continue;
+                  }
+                  sanitize_amiga_path(extraction_command);
+                  FreeVec(file_path_tmp);
+                  file_path_tmp = NULL;
 
 
 
@@ -490,7 +667,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                       {
                         strcat(single_error_message, " is corrupt");
                       }
-                      logError(single_error_message);
+                      log_error(single_error_message);
                     }
                     else
                     {
@@ -517,7 +694,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                                " failed to extract. "
                                "Unknown error");
                       }
-                      logError(single_error_message);
+                      log_error(single_error_message);
                     }
                   }
                   /* if the number of errors is greater then MAX_ERRORS, then quit */
@@ -597,7 +774,7 @@ int main(int argc, char *argv[])
   /* Grey text:   printf("\x1B[33m 33:\x1B[0m \n"); */
 
   printf("\n");
-  printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", version_number);
+  printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", VERSION_STRING);
 
   printf(
       "\x1B[32mThis program is designed to automatically locate "
@@ -626,26 +803,26 @@ int main(int argc, char *argv[])
   }
   else
   {
-    versionInfo = GetExecutableVersion("c:unlzx");
+    versionInfo = get_executable_version("c:unlzx");
     //printf("UnLZX version: %s", versionInfo);
     
     if (strcmp(versionInfo, "UnLZX 2.16") == 0)
     {
-      strcpy(lzxExtractCommand, "-x");
-      strcpy(lzxExtractTargetCommand, "-o");
+      strcpy(lzx_extract_command, "-x");
+      strcpy(lzx_extract_target_command, "-o");
       printf("UnLZX version recognised as UnLZX 2.16.\n");
     }
     else if (strcmp(versionInfo, "LZX 1.21") == 0)
     {
-      strcpy(lzxExtractCommand, "-q -x e");
-      strcpy(lzxExtractTargetCommand, "  ");
+      strcpy(lzx_extract_command, "-q -x e");
+      strcpy(lzx_extract_target_command, "  ");
       printf("UnLZX version recognised as LZX 1.21 \n");
     }
     else
     {
       /* default to " e" for now */
-      strcpy(lzxExtractCommand, " e");
-      printf("Unknown UnLZX version.  defaulting extraction command to %s\n", lzxExtractCommand);
+      strcpy(lzx_extract_command, " e");
+      printf("Unknown UnLZX version.  defaulting extraction command to %s\n", lzx_extract_command);
     }
     
     FreeVec(versionInfo);
@@ -740,12 +917,12 @@ int main(int argc, char *argv[])
   }
 
   printf("\nElapsed time: \x1B[1m%ld:%02ld:%02ld\x1B[0m\n", hours, minutes, seconds);
-  printErrors();
-  printf("\nWHDArchiveExtractor V%s\n\n", version_number);
+  print_errors();
+  printf("\nWHDArchiveExtractor V%s\n\n", VERSION_STRING);
   return 0;
 }
 
-char *GetExecutableVersion(const char *filePath)
+char *get_executable_version(const char *filePath)
 {
     char command[256];
     char *versionBuffer = NULL;
