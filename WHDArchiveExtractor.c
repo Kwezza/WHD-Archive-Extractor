@@ -755,7 +755,7 @@ char *GetExecutableVersion(const char *filePath)
 
     /* Create and execute the version command */
     sprintf(command, "version %s >ram:v.txt", filePath);
-    SystemTagList(command, NULL);
+    SystemTagList((CONST_STRPTR)command, NULL);
 
     /* Open the version file */
     versionFile = fopen("ram:v.txt", "r");
