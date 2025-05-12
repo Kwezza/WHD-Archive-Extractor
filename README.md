@@ -22,7 +22,7 @@
         <pre><code>$ WHDArchiveExtractor PC0:WHDLoad/Beta DH0:WHDLoad/Beta</code></pre>
         <p>This will scan the PC0:WHDLoad/Beta directory and extract all LHA archives found to the DH0:WHDLoad/Beta directory, preserving the folder structure.</p>
             <h2>Building</h2>
-        <p>To compile the program, use an Amiga C compiler, such as SAS/C, with the provided source code.</p>
+        <p>To compile the program, use an Amiga C compiler, such as SAS/C, with the provided source code. It must be compiled with the StackExtend flag to avoid stack overflows.  As far as I know, this feature is only supported by the SAS/C compiler.</p>
             <h2>Disclaimer</h2>
         <p>Before using this program, please make sure to backup any important data or files. The creators and contributors of this software are not responsible for any data loss or damage that may occur as a result of using this program.</p>
             <h2>License</h2>
