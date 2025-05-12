@@ -15,7 +15,6 @@ build/
 *.lnk
 *.o
 *.info
-smakefile
 WHDArchiveExtractor
 
 

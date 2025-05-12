@@ -1,0 +1,77 @@
+Short:        Automates extraction of WHDLoad archives
+Kurz:         Automatisiert das Entpacken von WHDLoad-Archiven
+Author:       kwezza@gmail.com (Kerry Thompson)
+Uploader:     kwezza@gmail.com (Kerry Thompson)
+Type:         util/arc
+Version:      1.2.1
+Requires:     util/arc/lha; util/arc/lzx121r1
+Architecture: m68k-amigaos >= 2.0.4
+License:      MIT License
+Source:       https://github.com/Kwezza/WHD-Archive-Extractor
+
+WHDArchiveExtractor is a dedicated tool for Amiga users working with WHDLoad
+archives. It addresses the common issue of archives becoming corrupted when
+extracted on non-Amiga platforms, ensuring a fully Amiga-compliant 
+extraction process. Designed with WHDLoad Download Tool users in mind, this
+utility automates locating and extracting LHA and LZX archives across 
+subdirectories, faithfully recreating the original folder structure the
+archives were found in.
+
+With the ability to automatically extract thousands of archives from a 
+single command, WHDArchiveExtractor streamlines the management of large
+archive collections, although the total extraction time will depend on the
+speed of the Amiga system. By extracting only new or updated files, the tool
+avoids unnecessary duplication, optimizing disk space usage. With its 
+Amiga-specific approach, WHDArchiveExtractor uses Amiga tools to extract
+archives so they retain their Amiga formatting, eliminating the risk of
+corruption that often arises from extractions on non-native environments.
+This tool was created to simplify managing my own WHDLoad folders, and I've
+released it publicly so others may hopefully find it useful.
+
+Feedback and suggestions are welcome at the author's email address above
+or via the project's GitHub page.
+
+KEY FEATURES
+- Scanning input folders and subfolders for LHA and LZX archives
+- Extracting the archives using the LHA or LZX programs to an output folder
+- Preserving the subfolder structure from the input folder during extraction
+- Extracting only new or updated files to avoid unnecessary duplication
+
+PREREQUISITES
+To use this program, ensure the LHA software is installed in the
+C: directory. You can download it from aminet.net/package/util/arc/lha.
+A very small number of archives require LZX to extract them.  This can be 
+got from aminet.net/package/util/arc/lzx121r1 
+
+USAGE
+$ WHDArchiveExtractor <source_directory> <output_directory>
+For example:
+
+$ WHDArchiveExtractor PC0:WHDLoad/Beta DH0:WHDLoad/Beta
+This will scan the PC0:WHDLoad/Beta directory and extract all LHA archives
+found to the DH0:WHDLoad/Beta directory, preserving the folder structure.
+
+CHANGELOG:
+[1.0.0] - 2023-04-28
+- First release
+
+[1.1.0] - 2024-03-12
+- Added support for LZX archives.
+- Improved error handling
+- If the target folder already exists, it will now be scanned for protected
+  files and the protection bits will be removed.  This is to allow the 
+  extraction to replace the files if needed.
+  
+[1.1.1] - 2024-03-15
+- Fixed some typos and text alignment issues
+
+[1.2.0]- 2025-05-06 
+- Added support for UnLZX 2.16 and LZX 1.21. Both LZX extractors use
+  different commands, which are now properly supported. Previously, the
+  program misleadingly implied support for both.
+    - Special thanks to Ed Brindley for identifying this issue.
+	
+[1.2.1]- 2025-05-10
+- Resolved buffer overflow issues and addressed a memory leak. 
+  Upgrading to this version is recommended.
+- Added a version cookie for the DOS "version" command.

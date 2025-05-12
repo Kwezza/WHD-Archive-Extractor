@@ -19,6 +19,11 @@
   To use this program, ensure the LHA software is installed in the C:
   directory. You can download it from aminet.net/package/util/arc/lha
 
+  This program uses extensive recursive functions to scan the input
+  directory and all its subdirectories for LHA and LZX archives.
+  It must be compiled with the StackExtend flag to avoid stack overflows.
+  As far as I know, this feature is only supported by the SAS/C compiler.
+
   v1.0.0 - 2023-04-02 - First version released.
 
   v1.1.0 - 2024-03-14 - Added support for LZX archives.  Download from
@@ -27,21 +32,26 @@
                       - If the target folder already exists, it
                         will now be scanned for protected files and the
                         protection bits will be removed.  This is to allow
-                        the extraction to replace the files.
+                        the extraction to replace the files if needed.
   
   v1.1.1 - 2024-03-15 - Fixed some typos and text alignment issues
 
-  v1.2.b1- 2025-05-06 - Added support for UnLZX 2.16 and LZX 1.21.
-                        Both of the LZX extracters use different
-                        commands and these are supported
+  v1.2.0 - 2025-05-06 - Added support for UnLZX 2.16 and LZX 1.21. 
+                        Both LZX extractors use different commands, which
+                        are now properly supported. Previously, the
+                        program misleadingly implied support for both.
+                        - Special thanks to Ed Brindley for identifying 
+                          this issue.
 
-  v1.2.1 - 2025-05-09 - Fixed some buffer overflow issues and a memory leak.
-                        Upgrading to this version is recommended.
+  v1.2.1 - 2025-05-10 - Resolved buffer overflow issues and addressed
+                        a memory leak. Upgrading to this version is 
+                        recommended.
                       - Added a version cookie for the dos "version"
                         command.
 
   This program is released under the MIT License.
-*/
+*/  
+
 
 #include <ctype.h>
 #include <dos/dos.h>
@@ -798,7 +808,7 @@ int main(int argc, char *argv[])
         "File c:unlzx does not exist. There are a few LZX compressed "
         "archives for WHDLoad.  This program will continue and ignore these "
         "archives until UnLZX is installed.  Please install the latest version "
-        "of UnLZX2.lha from www.aminet.org\n");
+        "of lzx121r1.lha from www.aminet.org\n");
 
   }
   else
