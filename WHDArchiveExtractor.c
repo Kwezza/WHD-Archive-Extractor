@@ -346,8 +346,20 @@ void remove_trailing_slash(char *str)
  */
 void log_error(const char *errorMessage)
 {
-  strncpy(error_messages_array[error_count], errorMessage, MAX_ERROR_LENGTH);
-  error_messages_array[error_count][MAX_ERROR_LENGTH - 1] = '\0'; /* Ensure null-termination */
+  if (error_count >= MAX_ERRORS)
+  {
+    return;
+  }
+
+  if (errorMessage == NULL)
+  {
+    error_messages_array[error_count][0] = '\0';
+  }
+  else
+  {
+    strncpy(error_messages_array[error_count], errorMessage, MAX_ERROR_LENGTH - 1);
+    error_messages_array[error_count][MAX_ERROR_LENGTH - 1] = '\0'; /* Ensure null-termination */
+  }
   error_count++;
 }
 
@@ -419,7 +431,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   char extraction_command[256];
   char ExtractTargetCommand[4];
   char *directoryName;
-  char program_name[6];
+  char program_name[16];
   char fileCommandStore[256];
   LONG command_result;
   char *file_path_tmp = NULL;
@@ -464,7 +476,10 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
             }
             else
             {
-              get_file_extension(file_info_block->fib_FileName, file_extension);
+              if (get_file_extension(file_info_block->fib_FileName, file_extension) == NULL)
+              {
+                continue;
+              }
 
               if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
               {
@@ -815,8 +830,14 @@ int main(int argc, char *argv[])
   {
     versionInfo = get_executable_version("c:unlzx");
     //printf("UnLZX version: %s", versionInfo);
-    
-    if (strcmp(versionInfo, "UnLZX 2.16") == 0)
+
+    if (versionInfo == NULL)
+    {
+      printf("Unable to detect UnLZX version. defaulting extraction command to \" e\"\n");
+      strcpy(lzx_extract_command, " e");
+      strcpy(lzx_extract_target_command, "  ");
+    }
+    else if (strcmp(versionInfo, "UnLZX 2.16") == 0)
     {
       strcpy(lzx_extract_command, "-x");
       strcpy(lzx_extract_target_command, "-o");
@@ -834,11 +855,14 @@ int main(int argc, char *argv[])
       strcpy(lzx_extract_command, " e");
       printf("Unknown UnLZX version.  defaulting extraction command to %s\n", lzx_extract_command);
     }
-    
-    FreeVec(versionInfo);
+
+    if (versionInfo != NULL)
+    {
+      FreeVec(versionInfo);
+    }
   }
 
-  if (argc < 2)
+  if (argc < 3)
   {
     printf(
         "\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
@@ -850,7 +874,7 @@ int main(int argc, char *argv[])
   output_directory_path = argv[2];
 
   skip_disk_space_check = true;
-  for (i = 4; i < argc; i++)
+  for (i = 3; i < argc; i++)
   {
     if (strcmp(argv[i], "-enablespacecheck") == 0)
     {
@@ -939,9 +963,23 @@ char *get_executable_version(const char *filePath)
     FILE *versionFile;
     char line[256];
     int len;
+  size_t needed;
+
+  if (filePath == NULL)
+  {
+    return NULL;
+  }
 
     /* Create and execute the version command */
-    sprintf(command, "version %s >ram:v.txt", filePath);
+  needed = strlen("version ") + strlen(filePath) + strlen(" >ram:v.txt") + 1;
+  if (needed > sizeof(command))
+  {
+    return NULL;
+  }
+
+  strcpy(command, "version ");
+  strcat(command, filePath);
+  strcat(command, " >ram:v.txt");
     SystemTagList((CONST_STRPTR)command, NULL);
 
     /* Open the version file */
