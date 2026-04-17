@@ -1,0 +1,59 @@
+run from folder pc1:Programming/WHD-Archive-Extractor/WHD-Archive-Extractor
+
+
+*************************************************************
+
+run with:  WHDArchiveExtractor pc1:WHDFetch/GameFiles pc1:whdtarget -enablecustomicons 
+
+Scanned 5331 directories and found 5118 archives.
+Archives composed of 5114 LHA and 4 LZX archives.
+Destination conflicts detected: 1
+Created destination drawers during prep: 5223
+Drawer icons attempted: 5223, applied: 5223
+
+Elapsed time: 0:19:28
+
+No errors encountered.
+
+WHDArchiveExtractor V1.2.1
+
+*********************************************************
+
+run with:  WHDArchiveExtractor pc1:WHDFetch/GameFiles pc1:whdtarget -enablecustomicons -skipifdestexists
+
+
+Scanned 5331 directories and found 0 archives.
+Archives composed of 0 LHA and 0 LZX archives.
+Skipped because destination existed: 5118
+Destination conflicts detected: 1
+Drawer icons attempted: 0, applied: 0
+
+Elapsed time: 0:01:11
+
+No errors encountered.
+
+WHDArchiveExtractor V1.2.1
+
+*********************************************************
+
+deleted:  WHDTarget\Games\E\EddTheDuck2 
+deleted:  WHDTarget\Demos\H\HitCollection1
+
+run with:  WHDArchiveExtractor pc1:WHDFetch/GameFiles pc1:whdtarget -enablecustomicons -skipifdestexists
+
+Scanned 5331 directories and found 0 archives.
+Archives composed of 0 LHA and 0 LZX archives.
+Skipped because destination existed: 5118
+Destination conflicts detected: 1
+Drawer icons attempted: 0, applied: 0
+
+Elapsed time: 0:00:41
+
+No errors encountered.
+
+WHDArchiveExtractor V1.2.1
+
+!! result:  didnt pick up on the two deleted directories.  Might be due to me deleteing them from a PC mounted drive.  Will exit and restart WinUAE and try again.
+
+
+

@@ -22,7 +22,7 @@ Minimum required: `WHDArchiveExtractor <source_directory> <output_directory>`
 If fewer than 3 arguments are supplied the program prints usage text and exits with code `1`.
 
 ```
-WHDArchiveExtractor <source_directory> <output_directory> [-enablespacecheck] [-testarchivesonly]
+WHDArchiveExtractor <source_directory> <output_directory> [-enablespacecheck] [-testarchivesonly] [-skipifdestexists] [-quietskips] [-enablecustomicons]
 ```
 
 | Argument              | Effect |
@@ -31,6 +31,9 @@ WHDArchiveExtractor <source_directory> <output_directory> [-enablespacecheck] [-
 | `argv[2]`             | Destination directory path (`output_directory_path`) |
 | `-enablespacecheck`   | Enables the 20 MB free-space check before each extraction. Disabled by default. |
 | `-testarchivesonly`   | Passes a test/verify flag to the extractor instead of extracting files. |
+| `-skipifdestexists`   | Skips extraction when the destination drawer already exists (normal mode only). |
+| `-quietskips`         | Hides per-archive skip lines while keeping periodic progress heartbeat output. |
+| `-enablecustomicons`  | Applies custom drawer icons to newly created destination drawers. |
 
 After parsing, trailing slashes are stripped from both paths with `remove_trailing_slash()`.
 
@@ -92,6 +95,14 @@ The extraction command is assembled from:
 
 The path is sanitised by `sanitize_amiga_path()` to handle Amiga volume-colon and double-slash edge cases, then executed with `SystemTagList()`.
 
+### 5d. Destination-exists skip handling
+
+When `-skipifdestexists` is enabled (and not in test mode), archives whose destination drawer already exists are skipped.
+
+- Skip count is recorded for the final summary.
+- If `-quietskips` is not enabled, each skip prints a per-archive line.
+- If `-quietskips` is enabled, skip lines are suppressed and periodic scan heartbeat lines are printed instead.
+
 ---
 
 ## 6. Extraction Error Handling
@@ -120,13 +131,18 @@ After the scan loop completes, the program prints:
    ```
    Scanned N directories and found N archives.
    Archives composed of N LHA and N LZX archives.
+   Archives extracted: N
    ```
-2. **UnLZX warning** (if LZX archives were found but `c:unlzx` is not installed):
+2. **Skip/conflict and runtime mode notes** (printed when applicable):
+   - `Skipped because destination existed: N`
+   - Destination conflict counters
+   - Quiet mode summary note when `-quietskips` is active
+3. **UnLZX warning** (if LZX archives were found but `c:unlzx` is not installed):
    ```
    UnLZX is not installed. N LZX archives were found but not expanded.
    ```
-3. **Elapsed time** in `H:MM:SS` format.
-4. **Error list** (via `print_errors()`):
+4. **Elapsed time** in `H:MM:SS` format.
+5. **Error list** (via `print_errors()`):
    - If errors were logged, each is printed as `Error N: <message>`.
    - If no errors occurred, prints `No errors encountered.`
-5. **Version banner** — the program name and version string are printed again as a closing line.
+6. **Version banner** — the program name and version string are printed again as a closing line.

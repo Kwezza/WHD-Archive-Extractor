@@ -1,5 +1,30 @@
 # Developer Log
 
+## 2026-04-17 - Task 2 implemented: extracted counter and quiet skip logging
+
+This update improves rerun visibility when using destination-exists skipping, and reduces output noise during large scans.
+
+### Command-line behavior
+
+- New optional switch: `-quietskips`
+- `-quietskips` suppresses per-archive skip lines emitted by `-skipifdestexists`.
+- Quiet mode keeps conflict and error output visible.
+- Quiet mode prints periodic scan heartbeat lines to show progress on slower machines.
+
+### Summary changes
+
+- Added summary line:
+  - `Archives extracted: <count>`
+- Extracted count increments only when an archive extraction command succeeds in normal mode.
+- `-testarchivesonly` runs do not increment extracted count.
+- When quiet mode is active, an extra summary note is printed to indicate reduced skip verbosity.
+
+### Notes for maintainers
+
+- Heartbeat cadence is currently fixed in source as `QUIET_HEARTBEAT_INTERVAL`.
+- Existing skip counter behavior is unchanged:
+  - `Skipped because destination existed: <count>` remains in summary.
+
 ## 2026-04-17 - Destination path preparation and drawer icon integration
 
 This update adds proactive destination drawer creation before archive extraction, and optional drawer icon application for newly created drawers.  This previously required a seperate program (available on Aminet) called IconSync to be run after WHDArchiveExtractor to create the icons.
@@ -111,3 +136,22 @@ For each supported archive:
 - Amiga path separator remains `/`.
 - Root path normalization still prevents invalid `:/` forms at volume roots.
 - Relative skip output is derived from normalized destination paths.
+
+## 2026-04-17 - Post-merge verification of safety and reliability fixes
+
+After resolving a branch/versioning merge issue, `WHDArchiveExtractor.c` was reviewed to verify that previously shipped safety fixes are still present in `main`.
+
+### Verified fixes still applied
+
+1. `program_name` buffer remains sized to safely hold `"c:unlzx"`.
+2. `log_error` still guards writes with `error_count < MAX_ERRORS` semantics (returns early when max is reached).
+3. Argument validation remains `argc < 3` to match required positional arguments.
+4. `versionInfo` null handling remains in place before `strcmp` checks and before `FreeVec`.
+5. `get_file_extension` return value is still checked and files are skipped when parsing fails.
+6. Optional argument parsing loop still starts at `i = 3`.
+7. `get_executable_version` still uses explicit length checks before command construction.
+
+### Notes
+
+- This entry records verification status after merge reconciliation.
+- No behavioral changes were introduced as part of this documentation update.

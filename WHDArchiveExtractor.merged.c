@@ -78,7 +78,6 @@
 #define MAX_TRACKED_DESTINATIONS 1024
 #define MAX_PATH_LENGTH 256
 #define MAX_AMIGA_COMPONENT_LENGTH 30
-#define MAX_CONFLICT_SAMPLES 10
 #define ICON_APPLIER_MAX_PATH 512
 #define ICON_APPLIER_DEFAULT_ICONS_DIR "PROGDIR:Icons"
 
@@ -88,11 +87,11 @@ typedef struct icon_applier_options
   const char *icons_dir;
 } icon_applier_options;
 
-bool skip_disk_space_check = false, test_archives_only = false, skip_if_dest_exists = false, enable_custom_icons = false, quiet_skips = false;
+bool skip_disk_space_check = false, test_archives_only = false, skip_if_dest_exists = false, enable_custom_icons = false;
 
 #define PROGRAM_NAME "WHD Archive Extractor"
-#define VERSION_STRING "1.3beta"
-#define VERSION_DATE "17.04.2026"
+#define VERSION_STRING "1.2.1"
+#define VERSION_DATE "09.05.2025"
 
 char *input_file_path;
 char *output_file_path;
@@ -139,7 +138,6 @@ void  icon_applier_sanitize_path(char *path);
 const char *icon_applier_get_icons_dir(const icon_applier_options *options);
 BOOL  icon_applier_ensure_drawer_icon(const char *dir_path, const icon_applier_options *options);
 char *get_executable_version(const char *filePath);
-void  record_destination_conflict_sample(const char *destination_path);
 
 int num_lzx_archives_found = 0;
 int num_lha_archives_found = 0;
@@ -150,58 +148,6 @@ int num_directories_created = 0;
 int num_drawer_icons_attempted = 0;
 int num_drawer_icons_applied = 0;
 int num_drawer_icons_failed = 0;
-int num_archives_extracted = 0;
-char destination_conflict_samples[MAX_CONFLICT_SAMPLES][MAX_PATH_LENGTH];
-int conflict_sample_count = 0;
-int conflict_sample_omitted_count = 0;
-
-#define QUIET_HEARTBEAT_INTERVAL 250
-
-void maybe_print_quiet_heartbeat(void)
-{
-  if (quiet_skips && (num_directories_scanned % QUIET_HEARTBEAT_INTERVAL) == 0)
-  {
-    printf("[quiet] Scan heartbeat: scanned \x1B[1m%d\x1B[0m entries, archives found \x1B[1m%d\x1B[0m\n",
-           num_directories_scanned,
-           num_lha_archives_found + num_lzx_archives_found);
-  }
-}
-
-void record_destination_conflict_sample(const char *destination_path)
-{
-  const char *relative_path;
-  int i;
-
-  if (destination_path == NULL || output_directory_path == NULL)
-  {
-    return;
-  }
-
-  relative_path = remove_text((char *)destination_path, output_directory_path);
-  if (relative_path == NULL || relative_path[0] == '\0')
-  {
-    return;
-  }
-
-  for (i = 0; i < conflict_sample_count; i++)
-  {
-    if (strcmp(destination_conflict_samples[i], relative_path) == 0)
-    {
-      return;
-    }
-  }
-
-  if (conflict_sample_count < MAX_CONFLICT_SAMPLES)
-  {
-    strncpy(destination_conflict_samples[conflict_sample_count], relative_path, MAX_PATH_LENGTH - 1);
-    destination_conflict_samples[conflict_sample_count][MAX_PATH_LENGTH - 1] = '\0';
-    conflict_sample_count++;
-  }
-  else
-  {
-    conflict_sample_omitted_count++;
-  }
-}
 
 
 
@@ -958,7 +904,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
           if (strcmp(file_info_block->fib_FileName, ".") != 0 && strcmp(file_info_block->fib_FileName, "..") != 0)
           {
             num_directories_scanned++;
-            maybe_print_quiet_heartbeat();
 
             /* Safe construction of current_file_path */
             needed = strlen(input_directory_path) + 1 + strlen(file_info_block->fib_FileName) + 1;
@@ -976,7 +921,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
             if (file_info_block->fib_DirEntryType > 0)
             {
               num_directories_scanned++;
-              maybe_print_quiet_heartbeat();
 
               get_directory_contents(current_file_path, output_directory_path);
             }
@@ -1074,7 +1018,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   printf("Conflict: destination path exists but is not a drawer: \x1B[1m%s\x1B[0m\n", destination_drawer_path);
                   num_destination_conflicts++;
                   num_destination_not_drawer_conflicts++;
-                  record_destination_conflict_sample(destination_drawer_path);
                   destination_conflict_detected = 1;
                 }
 
@@ -1082,7 +1025,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 {
                   printf("Conflict: two archives map to the same destination drawer: \x1B[1m%s\x1B[0m\n", destination_drawer_path);
                   num_destination_conflicts++;
-                  record_destination_conflict_sample(destination_drawer_path);
                   destination_conflict_detected = 1;
                 }
                 else
@@ -1104,10 +1046,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 if (skip_if_dest_exists && !test_archives_only && destination_path_state == 1)
                 {
                   relative_destination_path = remove_text(destination_drawer_path, output_directory_path);
-                  if (!quiet_skips)
-                  {
-                    printf("Skipping \x1B[1m%s\x1B[0m (already exists: \x1B[1m%s\x1B[0m)\n", file_info_block->fib_FileName, relative_destination_path);
-                  }
+                  printf("Skipping \x1B[1m%s\x1B[0m (already exists: \x1B[1m%s\x1B[0m)\n", file_info_block->fib_FileName, relative_destination_path);
                   num_archives_skipped_dest_exists++;
                   FreeVec(file_path_tmp);
                   file_path_tmp = NULL;
@@ -1359,10 +1298,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                       log_error(single_error_message);
                     }
                   }
-                  else if (!test_archives_only)
-                  {
-                    num_archives_extracted++;
-                  }
                   /* if the number of errors is greater then MAX_ERRORS, then quit */
                   if (error_count >= MAX_ERRORS)
                   {
@@ -1508,7 +1443,7 @@ int main(int argc, char *argv[])
     printf(
         "\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
         "<output_directory_path> [-enablespacecheck (experimental)] "
-        "[-testarchivesonly] [-skipifdestexists] [-quietskips] [-enablecustomicons] \n\n");
+        "[-testarchivesonly] [-skipifdestexists] [-enablecustomicons] \n\n");
     return 1;
   }
 
@@ -1534,10 +1469,6 @@ int main(int argc, char *argv[])
     {
       enable_custom_icons = true;
     }
-    if (strcmp(argv[i], "-quietskips") == 0)
-    {
-      quiet_skips = true;
-    }
   }
 
   drawer_icon_options.use_custom_icons = enable_custom_icons ? TRUE : FALSE;
@@ -1556,14 +1487,6 @@ int main(int argc, char *argv[])
   else
   {
     printf("\x1B[1mCustom drawer icons:\x1B[0m disabled\n");
-  }
-  if (quiet_skips)
-  {
-    printf("\x1B[1mSkip logging:\x1B[0m quiet mode enabled (skip lines hidden, heartbeat every %d entries)\n", QUIET_HEARTBEAT_INTERVAL);
-  }
-  else
-  {
-    printf("\x1B[1mSkip logging:\x1B[0m normal\n");
   }
 
   if (does_folder_exists(input_directory_path) == 0)
@@ -1610,9 +1533,6 @@ int main(int argc, char *argv[])
       "Archives composed of \x1B[1m%d\x1B[0m LHA and \x1B[1m%d\x1B[0m "
       "LZX archives.\n",
       num_lha_archives_found, num_lzx_archives_found);
-    printf(
-      "Archives extracted: \x1B[1m%d\x1B[0m\n",
-      num_archives_extracted);
 
   if (num_archives_skipped_dest_exists > 0)
   {
@@ -1633,20 +1553,6 @@ int main(int argc, char *argv[])
     printf(
         "Conflicts where destination was not a drawer: \x1B[1m%d\x1B[0m\n",
         num_destination_not_drawer_conflicts);
-  }
-
-  if (conflict_sample_count > 0)
-  {
-    int i;
-    printf("Sample destination conflicts (up to %d):\n", MAX_CONFLICT_SAMPLES);
-    for (i = 0; i < conflict_sample_count; i++)
-    {
-      printf("  %d. \x1B[1m%s\x1B[0m\n", i + 1, destination_conflict_samples[i]);
-    }
-    if (conflict_sample_omitted_count > 0)
-    {
-      printf("  ...and \x1B[1m%d\x1B[0m more\n", conflict_sample_omitted_count);
-    }
   }
 
   if (num_directories_created > 0)
@@ -1680,11 +1586,6 @@ int main(int argc, char *argv[])
           "UnLZX is not installed.  \x1B[1m%d\x1B[0m LZX archives were found but not expanded.\n",
           num_lzx_archives_found);
     }
-  }
-
-  if (quiet_skips)
-  {
-    printf("Summary note: quiet skip logging was enabled (-quietskips).\n");
   }
 
   printf("\nElapsed time: \x1B[1m%ld:%02ld:%02ld\x1B[0m\n", hours, minutes, seconds);
