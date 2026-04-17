@@ -1,0 +1,21 @@
+# Makefile for SAS/C on Amiga
+SC = sc
+LINK = slink
+
+# Compilation flags
+CFLAGS = noicon StackExtend
+
+# Linker flags
+LFLAGS = 
+
+# Default target
+all: WHDArchiveExtractor
+
+WHDArchiveExtractor: WHDArchiveExtractor.o
+    $(SC) link to WHDArchiveExtractor $(CFLAGS) WHDArchiveExtractor.o 
+
+WHDArchiveExtractor.o: WHDArchiveExtractor.c
+    $(SC) $(CFLAGS) WHDArchiveExtractor.c 
+
+clean:
+    delete WHDArchiveExtractor.o WHDArchiveExtractor WHDArchiveExtractor.info WHDArchiveExtractor.lnk 

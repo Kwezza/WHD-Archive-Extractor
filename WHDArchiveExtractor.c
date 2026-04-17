@@ -50,8 +50,9 @@
 #define MAX_ERROR_LENGTH 256
 #define DEBUG 1
 #define BUFFER_SIZE 1024
+#define MAX_TRACKED_DESTINATIONS 1024
 
-bool skip_disk_space_check = false, test_archives_only = false;
+bool skip_disk_space_check = false, test_archives_only = false, skip_if_dest_exists = false;
 char *input_file_path;
 char *output_file_path;
 char single_error_message[MAX_ERROR_LENGTH];
@@ -63,6 +64,7 @@ int  num_directories_scanned;
 int  should_stop_app = 0; /* used to stop the app if the lha extraction fails */
 long start_time;
 int  resetProtectionBits = 1;
+int  destination_tracking_overflow_warned = 0;
 
 STRPTR input_directory_path;
 STRPTR output_directory_path;
@@ -81,9 +83,17 @@ void  printErrors(void);
 void  remove_trailing_slash(char *str);
 char *findFirstDirectory(char *filePath);
 char *get_file_extension(const char *filename, char *outputBuffer);
+int   get_path_state(const char *path);
+int   is_destination_claimed(const char *destination_path);
+int   add_claimed_destination(const char *destination_path);
 
 int num_lzx_archives_found = 0;
 int num_lha_archives_found = 0;
+int num_archives_skipped_dest_exists = 0;
+int num_destination_conflicts = 0;
+int num_destination_not_drawer_conflicts = 0;
+char claimed_destinations[MAX_TRACKED_DESTINATIONS][MAX_ERROR_LENGTH];
+int claimed_destinations_count = 0;
 
 /*
  * Function to sanitize an Amiga file path in-place by correcting specific path issues.
@@ -255,6 +265,74 @@ int does_folder_exists(const char *folder_name)
   }
 }
 
+/*
+ * Returns destination path state:
+ *  1 = exists and is a directory
+ *  0 = does not exist or cannot be examined
+ * -1 = exists but is not a directory
+ */
+int get_path_state(const char *path)
+{
+  BPTR lock;
+  int path_state;
+  struct FileInfoBlock *file_info_block;
+
+  lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+  if (lock == 0)
+  {
+    return 0;
+  }
+
+  path_state = 0;
+  file_info_block = (struct FileInfoBlock *)AllocMem(sizeof(struct FileInfoBlock), MEMF_CLEAR);
+  if (file_info_block)
+  {
+    if (Examine(lock, file_info_block))
+    {
+      if (file_info_block->fib_DirEntryType > 0)
+      {
+        path_state = 1;
+      }
+      else
+      {
+        path_state = -1;
+      }
+    }
+    FreeMem(file_info_block, sizeof(struct FileInfoBlock));
+  }
+
+  UnLock(lock);
+  return path_state;
+}
+
+int is_destination_claimed(const char *destination_path)
+{
+  int i;
+
+  for (i = 0; i < claimed_destinations_count; i++)
+  {
+    if (strcmp(claimed_destinations[i], destination_path) == 0)
+    {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+int add_claimed_destination(const char *destination_path)
+{
+  if (claimed_destinations_count >= MAX_TRACKED_DESTINATIONS)
+  {
+    return 0;
+  }
+
+  strncpy(claimed_destinations[claimed_destinations_count], destination_path, MAX_ERROR_LENGTH - 1);
+  claimed_destinations[claimed_destinations_count][MAX_ERROR_LENGTH - 1] = '\0';
+  claimed_destinations_count++;
+  return 1;
+}
+
 void remove_trailing_slash(char *str)
 {
   if (str != NULL && strlen(str) > 0 && str[strlen(str) - 1] == '/')
@@ -327,8 +405,15 @@ char *findFirstDirectory(char *filePath)
 void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path)
 {
   BPTR dir_lock;
+  int has_lha_destination_name;
+  size_t archive_filename_length;
+  int destination_path_state;
+  int destination_conflict_detected;
   char file_extension[5];
   char current_file_path[256];
+  char destination_drawer_path[256];
+  char lha_destination_name[256];
+  char archive_name_without_extension[256];
   char ExtractCommand[20];
   char extraction_command[256];
   char *directoryName;
@@ -370,12 +455,89 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
 
               if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
               {
-                sprintf(fileCommandStore, "%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
-                sanitizeAmigaPath(fileCommandStore);
-                printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
                 if (strcmp(file_extension, ".LHA") == 0)
                 {
                   num_lha_archives_found++;
+                }
+                else
+                {
+                  num_lzx_archives_found++;
+                }
+
+                sprintf(fileCommandStore, "%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)));
+                sanitizeAmigaPath(fileCommandStore);
+
+                strcpy(archive_name_without_extension, file_info_block->fib_FileName);
+                archive_filename_length = strlen(archive_name_without_extension);
+                if (archive_filename_length > 4)
+                {
+                  archive_name_without_extension[archive_filename_length - 4] = '\0';
+                }
+
+                sprintf(destination_drawer_path, "%s/%s", fileCommandStore, archive_name_without_extension);
+                sanitizeAmigaPath(destination_drawer_path);
+
+                has_lha_destination_name = 0;
+                lha_destination_name[0] = '\0';
+                if (strcmp(file_extension, ".LHA") == 0)
+                {
+                  sprintf(extraction_command, "lha vq \"%s\" >ram:listing.txt", current_file_path);
+                  sanitizeAmigaPath(extraction_command);
+                  SystemTagList(extraction_command, NULL);
+                  directoryName = findFirstDirectory("ram:listing.txt");
+                  DeleteFile("ram:listing.txt");
+
+                  if (directoryName != NULL && directoryName[0] != '\0')
+                  {
+                    strncpy(lha_destination_name, directoryName, sizeof(lha_destination_name) - 1);
+                    lha_destination_name[sizeof(lha_destination_name) - 1] = '\0';
+                    has_lha_destination_name = 1;
+
+                    sprintf(destination_drawer_path, "%s/%s", fileCommandStore, lha_destination_name);
+                    sanitizeAmigaPath(destination_drawer_path);
+                  }
+                }
+
+                destination_conflict_detected = 0;
+                destination_path_state = get_path_state(destination_drawer_path);
+                if (destination_path_state == -1)
+                {
+                  printf("Conflict: destination path exists but is not a drawer: \x1B[1m%s\x1B[0m\n", destination_drawer_path);
+                  num_destination_conflicts++;
+                  num_destination_not_drawer_conflicts++;
+                  destination_conflict_detected = 1;
+                }
+
+                if (is_destination_claimed(destination_drawer_path))
+                {
+                  printf("Conflict: two archives map to the same destination drawer: \x1B[1m%s\x1B[0m\n", destination_drawer_path);
+                  num_destination_conflicts++;
+                  destination_conflict_detected = 1;
+                }
+                else
+                {
+                  if (!add_claimed_destination(destination_drawer_path) && destination_tracking_overflow_warned == 0)
+                  {
+                    printf("Warning: destination conflict tracking limit reached. Further destination conflicts may not be detected.\n");
+                    destination_tracking_overflow_warned = 1;
+                  }
+                }
+
+                if (destination_conflict_detected)
+                {
+                  continue;
+                }
+
+                if (skip_if_dest_exists && !test_archives_only && destination_path_state == 1)
+                {
+                  printf("Skipping \x1B[1m%s\x1B[0m (destination already exists: \x1B[1m%s\x1B[0m)\n", file_info_block->fib_FileName, destination_drawer_path);
+                  num_archives_skipped_dest_exists++;
+                  continue;
+                }
+
+                printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
+                if (strcmp(file_extension, ".LHA") == 0)
+                {
                   strcpy(program_name, "lha");
                   if (test_archives_only)
                   {
@@ -387,18 +549,13 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
 
                     if (resetProtectionBits == 1)
                     {
-
-                      sprintf(extraction_command, "lha vq \"%s\" >ram:listing.txt", current_file_path);
-                      sanitizeAmigaPath(extraction_command);
-                      SystemTagList(extraction_command, NULL);
-                      directoryName = findFirstDirectory("ram:listing.txt");
-                      if (directoryName != NULL)
+                      if (has_lha_destination_name)
                       {
-                        sprintf(fileCommandStore, "%s/%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
+                        sprintf(fileCommandStore, "%s/%s/%s", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), lha_destination_name);
                         sanitizeAmigaPath(fileCommandStore);
                         if (does_folder_exists(fileCommandStore) == 1)
                         {
-                          sprintf(fileCommandStore, "protect %s/%s/%s/#? ALL rwed >NIL:", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), directoryName);
+                          sprintf(fileCommandStore, "protect %s/%s/%s/#? ALL rwed >NIL:", output_directory_path, get_file_path(remove_text(current_file_path, input_file_path)), lha_destination_name);
                           sanitizeAmigaPath(fileCommandStore);
                           printf("Prepping any protected files for potential replacement...\n");
                           SystemTagList(fileCommandStore, NULL);
@@ -409,14 +566,12 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                         printf("Unable to get the file path from the LHA output for file %s.\n", current_file_path);
                       }
                     }
-                    DeleteFile("ram:listing.txt");
                     ExtractCommand[0] = '\0';
                     strcpy(ExtractCommand, "-T -M -N -m x\0");
                   }
                 }
                 else
                 {
-                  num_lzx_archives_found++;
                   strcpy(program_name, "unlzx");
                   if (test_archives_only)
                   {
@@ -611,11 +766,12 @@ int main(int argc, char *argv[])
         "of UnLZX2.lha from www.aminet.org\n");
   }
 
-  if (argc < 2)
+  if (argc < 3)
   {
     printf(
         "\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
-        "<output_directory_path> [-enablespacecheck (experimental)] \n\n");
+        "<output_directory_path> [-enablespacecheck (experimental)] "
+        "[-testarchivesonly] [-skipifdestexists] \n\n");
     return 1;
   }
 
@@ -623,7 +779,7 @@ int main(int argc, char *argv[])
   output_directory_path = argv[2];
 
   skip_disk_space_check = true;
-  for (i = 4; i < argc; i++)
+  for (i = 3; i < argc; i++)
   {
     if (strcmp(argv[i], "-enablespacecheck") == 0)
     {
@@ -632,6 +788,10 @@ int main(int argc, char *argv[])
     if (strcmp(argv[i], "-testarchivesonly") == 0)
     {
       test_archives_only = true;
+    }
+    if (strcmp(argv[i], "-skipifdestexists") == 0)
+    {
+      skip_if_dest_exists = true;
     }
   }
 
@@ -687,6 +847,27 @@ int main(int argc, char *argv[])
       "Archives composed of \x1B[1m%d\x1B[0m LHA and \x1B[1m%d\x1B[0m "
       "LZX archives.\n",
       num_lha_archives_found, num_lzx_archives_found);
+
+  if (num_archives_skipped_dest_exists > 0)
+  {
+    printf(
+        "Skipped because destination existed: \x1B[1m%d\x1B[0m\n",
+        num_archives_skipped_dest_exists);
+  }
+
+  if (num_destination_conflicts > 0)
+  {
+    printf(
+        "Destination conflicts detected: \x1B[1m%d\x1B[0m\n",
+        num_destination_conflicts);
+  }
+
+  if (num_destination_not_drawer_conflicts > 0)
+  {
+    printf(
+        "Conflicts where destination was not a drawer: \x1B[1m%d\x1B[0m\n",
+        num_destination_not_drawer_conflicts);
+  }
 
   if (num_lzx_archives_found > 0)
   {
