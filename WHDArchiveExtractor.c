@@ -38,10 +38,12 @@
 #include <exec/types.h>
 #include <proto/dos.h>
 #include <proto/exec.h>
+#include <proto/icon.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <workbench/icon.h>
 
 #define bool int
 #define true 1
@@ -51,8 +53,18 @@
 #define DEBUG 1
 #define BUFFER_SIZE 1024
 #define MAX_TRACKED_DESTINATIONS 1024
+#define MAX_PATH_LENGTH 256
+#define MAX_AMIGA_COMPONENT_LENGTH 30
+#define ICON_APPLIER_MAX_PATH 512
+#define ICON_APPLIER_DEFAULT_ICONS_DIR "PROGDIR:Icons"
 
-bool skip_disk_space_check = false, test_archives_only = false, skip_if_dest_exists = false;
+typedef struct icon_applier_options
+{
+  BOOL use_custom_icons;
+  const char *icons_dir;
+} icon_applier_options;
+
+bool skip_disk_space_check = false, test_archives_only = false, skip_if_dest_exists = false, enable_custom_icons = false;
 char *input_file_path;
 char *output_file_path;
 char single_error_message[MAX_ERROR_LENGTH];
@@ -68,6 +80,7 @@ int  destination_tracking_overflow_warned = 0;
 
 STRPTR input_directory_path;
 STRPTR output_directory_path;
+icon_applier_options drawer_icon_options = {FALSE, ICON_APPLIER_DEFAULT_ICONS_DIR};
 
 /* Function prototypes */
 char *get_file_path(const char *full_path);
@@ -84,16 +97,25 @@ void  remove_trailing_slash(char *str);
 char *findFirstDirectory(char *filePath);
 char *get_file_extension(const char *filename, char *outputBuffer);
 int   get_path_state(const char *path);
-int   is_destination_claimed(const char *destination_path);
-int   add_claimed_destination(const char *destination_path);
+int   is_destination_claimed(const char *destination_path, char *claimed_destinations[], int claimed_destinations_count);
+int   add_claimed_destination(const char *destination_path, char *claimed_destinations[], int *claimed_destinations_count);
+void  free_claimed_destinations(char *claimed_destinations[], int claimed_destinations_count);
+int   ensure_directory_exists(const char *path, int *created);
+int   ensure_path_directories(const char *base_root, const char *full_target_path, int *created_count);
+BOOL  icon_applier_exists(const char *path);
+void  icon_applier_sanitize_path(char *path);
+const char *icon_applier_get_icons_dir(const icon_applier_options *options);
+BOOL  icon_applier_ensure_drawer_icon(const char *dir_path, const icon_applier_options *options);
 
 int num_lzx_archives_found = 0;
 int num_lha_archives_found = 0;
 int num_archives_skipped_dest_exists = 0;
 int num_destination_conflicts = 0;
 int num_destination_not_drawer_conflicts = 0;
-char claimed_destinations[MAX_TRACKED_DESTINATIONS][MAX_ERROR_LENGTH];
-int claimed_destinations_count = 0;
+int num_directories_created = 0;
+int num_drawer_icons_attempted = 0;
+int num_drawer_icons_applied = 0;
+int num_drawer_icons_failed = 0;
 
 /*
  * Function to sanitize an Amiga file path in-place by correcting specific path issues.
@@ -150,6 +172,154 @@ void sanitizeAmigaPath(char *path)
   /* Copy back to the original path and free the allocated memory */
   strcpy(path, sanitizedPath);
   FreeVec(sanitizedPath);
+}
+
+BOOL icon_applier_exists(const char *path)
+{
+  BPTR lock;
+
+  if (path == NULL || path[0] == '\0')
+  {
+    return FALSE;
+  }
+
+  lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+  if (lock == 0)
+  {
+    return FALSE;
+  }
+
+  UnLock(lock);
+  return TRUE;
+}
+
+void icon_applier_sanitize_path(char *path)
+{
+  size_t i;
+
+  if (path == NULL)
+  {
+    return;
+  }
+
+  sanitizeAmigaPath(path);
+
+  for (i = 0; path[i] != '\0'; i++)
+  {
+    if (((unsigned char)path[i] < 32U) || strchr("*?#|<>\"{}", path[i]) != NULL)
+    {
+      path[i] = '_';
+    }
+  }
+
+  remove_trailing_slash(path);
+}
+
+const char *icon_applier_get_icons_dir(const icon_applier_options *options)
+{
+  if (options == NULL || options->icons_dir == NULL || options->icons_dir[0] == '\0')
+  {
+    return ICON_APPLIER_DEFAULT_ICONS_DIR;
+  }
+
+  return options->icons_dir;
+}
+
+BOOL icon_applier_ensure_drawer_icon(const char *dir_path, const icon_applier_options *options)
+{
+  size_t dir_path_length;
+  size_t icons_dir_length;
+  size_t leaf_name_length;
+  char info_path[ICON_APPLIER_MAX_PATH];
+  char source_icon_name[ICON_APPLIER_MAX_PATH];
+  const char *leaf_name;
+  const char *icons_dir;
+  const char *slash;
+  const char *colon;
+  struct DiskObject *diskobj;
+  static int icons_dir_checked = 0;
+  static BOOL icons_dir_exists = FALSE;
+
+  if (dir_path == NULL || options == NULL)
+  {
+    return FALSE;
+  }
+
+  dir_path_length = strlen(dir_path);
+  if (dir_path_length + 5 >= sizeof(info_path))
+  {
+    return FALSE;
+  }
+
+  strcpy(info_path, dir_path);
+  strcat(info_path, ".info");
+  icon_applier_sanitize_path(info_path);
+
+  /* Preserve existing icon files for drawers that already have one. */
+  if (icon_applier_exists(info_path))
+  {
+    return TRUE;
+  }
+
+  slash = strrchr(dir_path, '/');
+  if (slash != NULL)
+  {
+    leaf_name = slash + 1;
+  }
+  else
+  {
+    colon = strrchr(dir_path, ':');
+    leaf_name = (colon != NULL) ? (colon + 1) : dir_path;
+  }
+
+  if (leaf_name[0] == '\0')
+  {
+    return FALSE;
+  }
+
+  diskobj = NULL;
+  icons_dir = icon_applier_get_icons_dir(options);
+
+  if (options->use_custom_icons)
+  {
+    if (!icons_dir_checked)
+    {
+      icons_dir_exists = icon_applier_exists(icons_dir);
+      icons_dir_checked = 1;
+    }
+
+    if (icons_dir_exists)
+    {
+      icons_dir_length = strlen(icons_dir);
+      leaf_name_length = strlen(leaf_name);
+      if (icons_dir_length + leaf_name_length + 2 < sizeof(source_icon_name))
+      {
+        strcpy(source_icon_name, icons_dir);
+        strcat(source_icon_name, "/");
+        strcat(source_icon_name, leaf_name);
+        icon_applier_sanitize_path(source_icon_name);
+        diskobj = GetDiskObject((CONST_STRPTR)source_icon_name);
+      }
+    }
+  }
+
+  if (diskobj == NULL)
+  {
+    diskobj = GetDefDiskObject(WBDRAWER);
+    if (diskobj == NULL)
+    {
+      return FALSE;
+    }
+  }
+
+  if (!PutDiskObject((CONST_STRPTR)dir_path, diskobj))
+  {
+    FreeDiskObject(diskobj);
+    return FALSE;
+  }
+
+  FreeDiskObject(diskobj);
+  return TRUE;
 }
 
 char *remove_text(char *input_str, STRPTR text_to_remove)
@@ -305,7 +475,174 @@ int get_path_state(const char *path)
   return path_state;
 }
 
-int is_destination_claimed(const char *destination_path)
+int ensure_directory_exists(const char *path, int *created)
+{
+  BPTR created_lock;
+  int path_state;
+
+  if (created != NULL)
+  {
+    *created = 0;
+  }
+
+  path_state = get_path_state(path);
+  if (path_state == 1)
+  {
+    return 1;
+  }
+
+  if (path_state == -1)
+  {
+    return -1;
+  }
+
+  created_lock = CreateDir((CONST_STRPTR)path);
+  if (created_lock == 0)
+  {
+    return 0;
+  }
+
+  UnLock(created_lock);
+
+  if (get_path_state(path) == 1)
+  {
+    if (created != NULL)
+    {
+      *created = 1;
+    }
+    return 1;
+  }
+
+  return 0;
+}
+
+int ensure_path_directories(const char *base_root, const char *full_target_path, int *created_count)
+{
+  int status;
+  int created;
+  size_t base_length;
+  size_t current_length;
+  size_t component_length;
+  size_t new_length;
+  char current_path[MAX_PATH_LENGTH];
+  const char *relative_path;
+  const char *component_start;
+  const char *separator;
+
+  if (created_count != NULL)
+  {
+    *created_count = 0;
+  }
+
+  if (base_root == NULL || full_target_path == NULL)
+  {
+    return 0;
+  }
+
+  if (strlen(base_root) >= sizeof(current_path) || strlen(full_target_path) >= sizeof(current_path))
+  {
+    return 0;
+  }
+
+  strcpy(current_path, base_root);
+  sanitizeAmigaPath(current_path);
+  icon_applier_sanitize_path(current_path);
+  remove_trailing_slash(current_path);
+
+  if (get_path_state(current_path) != 1)
+  {
+    return 0;
+  }
+
+  base_length = strlen(current_path);
+  if (strncmp(full_target_path, current_path, base_length) != 0)
+  {
+    return 0;
+  }
+
+  relative_path = full_target_path + base_length;
+  while (*relative_path == '/')
+  {
+    relative_path++;
+  }
+
+  if (*relative_path == '\0')
+  {
+    return 1;
+  }
+
+  component_start = relative_path;
+  while (*component_start != '\0')
+  {
+    separator = strchr(component_start, '/');
+    if (separator != NULL)
+    {
+      component_length = (size_t)(separator - component_start);
+    }
+    else
+    {
+      component_length = strlen(component_start);
+    }
+
+    if (component_length == 0 || component_length > MAX_AMIGA_COMPONENT_LENGTH)
+    {
+      return 0;
+    }
+
+    if ((component_length == 1 && component_start[0] == '.') ||
+        (component_length == 2 && component_start[0] == '.' && component_start[1] == '.'))
+    {
+      return 0;
+    }
+
+    current_length = strlen(current_path);
+    new_length = current_length + 1 + component_length;
+    if (new_length >= sizeof(current_path))
+    {
+      return 0;
+    }
+
+    current_path[current_length] = '/';
+    memcpy(current_path + current_length + 1, component_start, component_length);
+    current_path[new_length] = '\0';
+
+    created = 0;
+    status = ensure_directory_exists(current_path, &created);
+    if (status <= 0)
+    {
+      return 0;
+    }
+
+    if (created && created_count != NULL)
+    {
+      (*created_count)++;
+    }
+
+    if (created && enable_custom_icons)
+    {
+      num_drawer_icons_attempted++;
+      if (icon_applier_ensure_drawer_icon(current_path, &drawer_icon_options))
+      {
+        num_drawer_icons_applied++;
+      }
+      else
+      {
+        num_drawer_icons_failed++;
+      }
+    }
+
+    if (separator == NULL)
+    {
+      break;
+    }
+
+    component_start = separator + 1;
+  }
+
+  return 1;
+}
+
+int is_destination_claimed(const char *destination_path, char *claimed_destinations[], int claimed_destinations_count)
 {
   int i;
 
@@ -320,17 +657,39 @@ int is_destination_claimed(const char *destination_path)
   return 0;
 }
 
-int add_claimed_destination(const char *destination_path)
+int add_claimed_destination(const char *destination_path, char *claimed_destinations[], int *claimed_destinations_count)
 {
-  if (claimed_destinations_count >= MAX_TRACKED_DESTINATIONS)
+  size_t destination_length;
+
+  if (*claimed_destinations_count >= MAX_TRACKED_DESTINATIONS)
   {
     return 0;
   }
 
-  strncpy(claimed_destinations[claimed_destinations_count], destination_path, MAX_ERROR_LENGTH - 1);
-  claimed_destinations[claimed_destinations_count][MAX_ERROR_LENGTH - 1] = '\0';
-  claimed_destinations_count++;
+  destination_length = strlen(destination_path) + 1;
+  claimed_destinations[*claimed_destinations_count] = (char *)AllocVec(destination_length, MEMF_ANY);
+  if (claimed_destinations[*claimed_destinations_count] == NULL)
+  {
+    return 0;
+  }
+
+  strcpy(claimed_destinations[*claimed_destinations_count], destination_path);
+  (*claimed_destinations_count)++;
   return 1;
+}
+
+void free_claimed_destinations(char *claimed_destinations[], int claimed_destinations_count)
+{
+  int i;
+
+  for (i = 0; i < claimed_destinations_count; i++)
+  {
+    if (claimed_destinations[i] != NULL)
+    {
+      FreeVec(claimed_destinations[i]);
+      claimed_destinations[i] = NULL;
+    }
+  }
 }
 
 void remove_trailing_slash(char *str)
@@ -405,10 +764,15 @@ char *findFirstDirectory(char *filePath)
 void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path)
 {
   BPTR dir_lock;
+  int folder_claimed_destinations_count;
   int has_lha_destination_name;
+  int directories_created_for_archive;
+  int path_prepare_result;
   size_t archive_filename_length;
   int destination_path_state;
   int destination_conflict_detected;
+  char *folder_claimed_destinations[MAX_TRACKED_DESTINATIONS];
+  char destination_claim_key[MAX_ERROR_LENGTH];
   char file_extension[5];
   char current_file_path[256];
   char destination_drawer_path[256];
@@ -416,12 +780,14 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   char archive_name_without_extension[256];
   char ExtractCommand[20];
   char extraction_command[256];
+  char *relative_destination_path;
   char *directoryName;
   char program_name[6];
   char fileCommandStore[256];
   LONG command_result;
 
   struct FileInfoBlock *file_info_block;
+  folder_claimed_destinations_count = 0;
   resetProtectionBits = 1;
 
   printf("Scanning directory: %s\n", input_directory_path);
@@ -498,6 +864,16 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   }
                 }
 
+                if (has_lha_destination_name)
+                {
+                  strncpy(destination_claim_key, lha_destination_name, MAX_ERROR_LENGTH - 1);
+                }
+                else
+                {
+                  strncpy(destination_claim_key, archive_name_without_extension, MAX_ERROR_LENGTH - 1);
+                }
+                destination_claim_key[MAX_ERROR_LENGTH - 1] = '\0';
+
                 destination_conflict_detected = 0;
                 destination_path_state = get_path_state(destination_drawer_path);
                 if (destination_path_state == -1)
@@ -508,7 +884,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   destination_conflict_detected = 1;
                 }
 
-                if (is_destination_claimed(destination_drawer_path))
+                if (is_destination_claimed(destination_claim_key, folder_claimed_destinations, folder_claimed_destinations_count))
                 {
                   printf("Conflict: two archives map to the same destination drawer: \x1B[1m%s\x1B[0m\n", destination_drawer_path);
                   num_destination_conflicts++;
@@ -516,7 +892,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 }
                 else
                 {
-                  if (!add_claimed_destination(destination_drawer_path) && destination_tracking_overflow_warned == 0)
+                  if (!add_claimed_destination(destination_claim_key, folder_claimed_destinations, &folder_claimed_destinations_count) && destination_tracking_overflow_warned == 0)
                   {
                     printf("Warning: destination conflict tracking limit reached. Further destination conflicts may not be detected.\n");
                     destination_tracking_overflow_warned = 1;
@@ -530,7 +906,8 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
 
                 if (skip_if_dest_exists && !test_archives_only && destination_path_state == 1)
                 {
-                  printf("Skipping \x1B[1m%s\x1B[0m (destination already exists: \x1B[1m%s\x1B[0m)\n", file_info_block->fib_FileName, destination_drawer_path);
+                  relative_destination_path = remove_text(destination_drawer_path, output_directory_path);
+                  printf("Skipping \x1B[1m%s\x1B[0m (already exists: \x1B[1m%s\x1B[0m)\n", file_info_block->fib_FileName, relative_destination_path);
                   num_archives_skipped_dest_exists++;
                   continue;
                 }
@@ -603,6 +980,33 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                     should_stop_app = 1;
                   }
                 }
+
+                if (should_stop_app == 0 && !test_archives_only)
+                {
+                  directories_created_for_archive = 0;
+                  path_prepare_result = ensure_path_directories(output_directory_path, destination_drawer_path, &directories_created_for_archive);
+                  if (!path_prepare_result)
+                  {
+                    printf(
+                        "\n\x1B[1mError:\x1B[0m "
+                        "Unable to prepare destination drawers "
+                        "for %s at %s\n",
+                        current_file_path,
+                        destination_drawer_path);
+
+                    strncpy(single_error_message, current_file_path, MAX_ERROR_LENGTH - 1);
+                    single_error_message[MAX_ERROR_LENGTH - 1] = '\0';
+                    if (strlen(single_error_message) + strlen(" failed to prepare destination path") < MAX_ERROR_LENGTH)
+                    {
+                      strcat(single_error_message, " failed to prepare destination path");
+                    }
+                    logError(single_error_message);
+                    continue;
+                  }
+
+                  num_directories_created += directories_created_for_archive;
+                }
+
                 if (should_stop_app == 0)
                 {
                   num_archives_found++;
@@ -682,6 +1086,8 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
     }
     UnLock(dir_lock);
   }
+
+  free_claimed_destinations(folder_claimed_destinations, folder_claimed_destinations_count);
 }
 
 int check_disk_space(STRPTR path, int min_space_mb)
@@ -771,7 +1177,7 @@ int main(int argc, char *argv[])
     printf(
         "\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
         "<output_directory_path> [-enablespacecheck (experimental)] "
-        "[-testarchivesonly] [-skipifdestexists] \n\n");
+        "[-testarchivesonly] [-skipifdestexists] [-enablecustomicons] \n\n");
     return 1;
   }
 
@@ -793,7 +1199,13 @@ int main(int argc, char *argv[])
     {
       skip_if_dest_exists = true;
     }
+    if (strcmp(argv[i], "-enablecustomicons") == 0)
+    {
+      enable_custom_icons = true;
+    }
   }
+
+  drawer_icon_options.use_custom_icons = enable_custom_icons ? TRUE : FALSE;
 
   remove_trailing_slash(input_directory_path);
   remove_trailing_slash(output_directory_path);
@@ -802,6 +1214,14 @@ int main(int argc, char *argv[])
 
   printf("\x1B[1mScanning directory:    \x1B[0m %s\n", input_directory_path);
   printf("\x1B[1mExtracting archives to:\x1B[0m %s\n", output_directory_path);
+  if (enable_custom_icons)
+  {
+    printf("\x1B[1mCustom drawer icons:\x1B[0m enabled (source: %s)\n", drawer_icon_options.icons_dir);
+  }
+  else
+  {
+    printf("\x1B[1mCustom drawer icons:\x1B[0m disabled\n");
+  }
 
   if (does_folder_exists(input_directory_path) == 0)
   {
@@ -867,6 +1287,28 @@ int main(int argc, char *argv[])
     printf(
         "Conflicts where destination was not a drawer: \x1B[1m%d\x1B[0m\n",
         num_destination_not_drawer_conflicts);
+  }
+
+  if (num_directories_created > 0)
+  {
+    printf(
+        "Created destination drawers during prep: \x1B[1m%d\x1B[0m\n",
+        num_directories_created);
+  }
+
+  if (enable_custom_icons)
+  {
+    printf(
+        "Drawer icons attempted: \x1B[1m%d\x1B[0m, applied: \x1B[1m%d\x1B[0m\n",
+        num_drawer_icons_attempted,
+        num_drawer_icons_applied);
+
+    if (num_drawer_icons_failed > 0)
+    {
+      printf(
+          "Drawer icon warnings (non-fatal): \x1B[1m%d\x1B[0m\n",
+          num_drawer_icons_failed);
+    }
   }
 
   if (num_lzx_archives_found > 0)

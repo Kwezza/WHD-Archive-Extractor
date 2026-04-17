@@ -193,6 +193,12 @@ The simplest and safest initial behaviour would be:
 
 This should remain basic and practical. It should not attempt advanced archive identity analysis.
 
+Memory-saving note for current implementation:
+
+- destination claim tracking is flushed per scanned folder scope
+- conflict detection therefore applies within the current folder scope
+- same-destination conflicts across different folder scopes in one run may not always be detected
+
 ---
 
 # 3. Dry-run mode
