@@ -81,6 +81,8 @@
 #define MAX_CONFLICT_SAMPLES 10
 #define ICON_APPLIER_MAX_PATH 512
 #define ICON_APPLIER_DEFAULT_ICONS_DIR "PROGDIR:Icons"
+#define MAX_LOG_FILENAME_LENGTH 128
+#define MAX_LOG_LINE_LENGTH 768
 
 typedef struct icon_applier_options
 {
@@ -88,7 +90,9 @@ typedef struct icon_applier_options
   const char *icons_dir;
 } icon_applier_options;
 
-bool skip_disk_space_check = false, test_archives_only = false, skip_if_dest_exists = false, enable_custom_icons = false, quiet_skips = false;
+bool skip_disk_space_check = false, test_archives_only = false, skip_if_dest_exists = false, enable_custom_icons = false, quiet_skips = false, debug_mode = false;
+bool unlzx_is_216 = false;
+bool lzx_test_skip_notice_printed = false;
 
 #define PROGRAM_NAME "WHD Archive Extractor"
 #define VERSION_STRING "1.3beta"
@@ -107,6 +111,13 @@ int  destination_tracking_overflow_warned = 0;
 int  reset_protection_bits = 1;
 char lzx_extract_command[9];  
 char lzx_extract_target_command[4];
+char debug_log_filename[MAX_LOG_FILENAME_LENGTH];
+char new_extract_log_filename[MAX_LOG_FILENAME_LENGTH];
+char test_errors_log_filename[MAX_LOG_FILENAME_LENGTH];
+int  new_extract_log_enabled = 0;
+int  new_extract_log_count = 0;
+int  test_errors_log_enabled = 0;
+int  test_errors_log_count = 0;
 const char *version = "$VER: " PROGRAM_NAME " " VERSION_STRING " (" VERSION_DATE ") compiled " __DATE__ " " __TIME__ "";
 
 STRPTR input_directory_path;
@@ -124,6 +135,8 @@ int   does_folder_exists(const char *folder_name);
 void  sanitize_amiga_path(char *path);
 void  get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path);
 void  log_error(const char *errorMessage);
+void  append_log_line(const char *filename, const char *line);
+int   build_timestamped_log_filename(const char *prefix, char *output_buffer, size_t output_buffer_size);
 void  print_errors(void);
 void  remove_trailing_slash(char *str);
 char *find_first_directory(char *filePath);
@@ -151,6 +164,7 @@ int num_drawer_icons_attempted = 0;
 int num_drawer_icons_applied = 0;
 int num_drawer_icons_failed = 0;
 int num_archives_extracted = 0;
+int num_lzx_archives_skipped_test_unsupported = 0;
 char destination_conflict_samples[MAX_CONFLICT_SAMPLES][MAX_PATH_LENGTH];
 int conflict_sample_count = 0;
 int conflict_sample_omitted_count = 0;
@@ -874,6 +888,62 @@ void print_errors()
   }
 }
 
+void append_log_line(const char *filename, const char *line)
+{
+  FILE *log_file;
+
+  if (filename == NULL || line == NULL || filename[0] == '\0')
+  {
+    return;
+  }
+
+  log_file = fopen(filename, "a");
+  if (log_file == NULL)
+  {
+    return;
+  }
+
+  fputs(line, log_file);
+  fputc('\n', log_file);
+  fflush(log_file);
+  fclose(log_file);
+}
+
+int build_timestamped_log_filename(const char *prefix, char *output_buffer, size_t output_buffer_size)
+{
+  time_t now;
+  struct tm *time_info;
+  char timestamp[32];
+  size_t needed;
+
+  if (prefix == NULL || output_buffer == NULL || output_buffer_size == 0)
+  {
+    return 0;
+  }
+
+  now = time(NULL);
+  time_info = localtime(&now);
+  if (time_info == NULL)
+  {
+    return 0;
+  }
+
+  strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", time_info);
+
+  needed = strlen(prefix) + strlen("-") + strlen(timestamp) + strlen(".txt") + 1;
+  if (needed > output_buffer_size)
+  {
+    return 0;
+  }
+
+  strcpy(output_buffer, prefix);
+  strcat(output_buffer, "-");
+  strcat(output_buffer, timestamp);
+  strcat(output_buffer, ".txt");
+
+  return 1;
+}
+
 char *find_first_directory(char *filePath)
 {
   static char directoryName[256]; /* Static buffer to hold the directory name */
@@ -1114,7 +1184,14 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   continue;
                 }
 
-                printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
+                if (test_archives_only && !(strcmp(file_extension, ".LZX") == 0 && unlzx_is_216))
+                {
+                  printf("Testing \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName);
+                }
+                else
+                {
+                  printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
+                }
                 FreeVec(file_path_tmp);
                 file_path_tmp = NULL;
                 if (strcmp(file_extension, ".LHA") == 0)
@@ -1158,25 +1235,21 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                             printf("Error: get_file_path returned NULL.\n");
                             continue;
                         }
-                        if (directoryName && strlen(fileCommandStore) + 1 < sizeof(fileCommandStore)) {
-                          strncat(fileCommandStore, "/", sizeof(fileCommandStore) - strlen(fileCommandStore) - 1);
-                        }
-                        if (directoryName && strlen(fileCommandStore) + strlen(directoryName) < sizeof(fileCommandStore)) {
-                          strncat(fileCommandStore, directoryName, sizeof(fileCommandStore) - strlen(fileCommandStore) - 1);
-                        }
                         sanitize_amiga_path(fileCommandStore);
+
                         if (does_folder_exists(fileCommandStore) == 1)
                         {
                           file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
                           if (file_path_tmp) {
-                              needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1 + strlen(directoryName) + strlen("/#? ALL rwed >NIL:") + 1;
+                                needed = strlen("protect \"") + strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1 + strlen(directoryName) + strlen("/#?\" all rwed >NIL:") + 1;
                               if (needed <= sizeof(fileCommandStore)) {
-                                  strcpy(fileCommandStore, output_directory_path);
+                                  strcpy(fileCommandStore, "protect \"");
+                                  strcat(fileCommandStore, output_directory_path);
                                   strcat(fileCommandStore, "/");
                                   strcat(fileCommandStore, file_path_tmp);
                                   strcat(fileCommandStore, "/");
                                   strcat(fileCommandStore, directoryName);
-                                  strcat(fileCommandStore, "/#? ALL rwed >NIL:");
+                                  strcat(fileCommandStore, "/#?\" all rwed >NIL:");
                               } else {
                                   printf("Error: Path too long for fileCommandStore buffer (protect).\n");
                                   log_error("Error: Path too long for extraction_command buffer.");
@@ -1189,8 +1262,10 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                               continue;
                           }
                           sanitize_amiga_path(fileCommandStore);
+
                           printf("Prepping any protected files for potential replacement...\n");
                           SystemTagList(fileCommandStore, NULL);
+
                           FreeVec(file_path_tmp);
                           file_path_tmp = NULL;
                         }
@@ -1209,11 +1284,23 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 else
                 {
                   num_lzx_archives_found++;
+
+                  if (test_archives_only && unlzx_is_216)
+                  {
+                    num_lzx_archives_skipped_test_unsupported++;
+                    if (!lzx_test_skip_notice_printed)
+                    {
+                      printf("UnLZX 2.16 does not support testing so LZX archives have been skipped.\n");
+                      lzx_test_skip_notice_printed = true;
+                    }
+                    continue;
+                  }
+
                   strcpy(ExtractTargetCommand, lzx_extract_target_command);
                   strcpy(program_name, "c:unlzx");
                   if (test_archives_only)
                   {
-                    strcpy(ExtractCommand, "-v\0");
+                    strcpy(ExtractCommand, "t\0");
                   }
                   else
                   {
@@ -1237,7 +1324,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                         "check space.\n20MB minimum checked "
                         "for.  To disable this check, launch "
                         "the program\nwithout the "
-                        "'-enablediskcheck' command.\n");
+                        "'-enablespacecheck' command.\n");
                     should_stop_app = 1;
                   }
                 }
@@ -1313,6 +1400,20 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   /* Check for error */
                   if (command_result != 0)
                   {
+                    if (test_archives_only && test_errors_log_enabled)
+                    {
+                      char test_error_line[MAX_LOG_LINE_LENGTH];
+
+                      test_error_line[0] = '\0';
+                      strncat(test_error_line, "archive=", MAX_LOG_LINE_LENGTH - strlen(test_error_line) - 1);
+                      strncat(test_error_line, current_file_path, MAX_LOG_LINE_LENGTH - strlen(test_error_line) - 1);
+                      strncat(test_error_line, " | rc=", MAX_LOG_LINE_LENGTH - strlen(test_error_line) - 1);
+                      sprintf(test_error_line + strlen(test_error_line), "%ld", command_result);
+
+                      append_log_line(test_errors_log_filename, test_error_line);
+                      test_errors_log_count++;
+                    }
+
                     if (command_result == 10)
                     {
                       printf(
@@ -1330,6 +1431,21 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                         strcat(single_error_message, " is corrupt");
                       }
                       log_error(single_error_message);
+
+                      if (debug_mode)
+                      {
+                        char debug_line[MAX_LOG_LINE_LENGTH];
+
+                        debug_line[0] = '\0';
+                        strncat(debug_line, "archive=", MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+                        strncat(debug_line, current_file_path, MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+                        strncat(debug_line, " | rc=", MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+                        sprintf(debug_line + strlen(debug_line), "%ld", command_result);
+                        strncat(debug_line, " | cmd=", MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+                        strncat(debug_line, extraction_command, MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+
+                        append_log_line(debug_log_filename, debug_line);
+                      }
                     }
                     else
                     {
@@ -1362,6 +1478,20 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   else if (!test_archives_only)
                   {
                     num_archives_extracted++;
+
+                    if (skip_if_dest_exists && new_extract_log_enabled)
+                    {
+                      char new_extract_line[MAX_LOG_LINE_LENGTH];
+
+                      new_extract_line[0] = '\0';
+                      strncat(new_extract_line, "archive=", MAX_LOG_LINE_LENGTH - strlen(new_extract_line) - 1);
+                      strncat(new_extract_line, file_info_block->fib_FileName, MAX_LOG_LINE_LENGTH - strlen(new_extract_line) - 1);
+                      strncat(new_extract_line, " | destination=", MAX_LOG_LINE_LENGTH - strlen(new_extract_line) - 1);
+                      strncat(new_extract_line, destination_drawer_path, MAX_LOG_LINE_LENGTH - strlen(new_extract_line) - 1);
+
+                      append_log_line(new_extract_log_filename, new_extract_line);
+                      new_extract_log_count++;
+                    }
                   }
                   /* if the number of errors is greater then MAX_ERRORS, then quit */
                   if (error_count >= MAX_ERRORS)
@@ -1483,12 +1613,14 @@ int main(int argc, char *argv[])
     {
       strcpy(lzx_extract_command, "-x");
       strcpy(lzx_extract_target_command, "-o");
+      unlzx_is_216 = true;
       printf("UnLZX version recognised as UnLZX 2.16.\n");
     }
     else if (strcmp(versionInfo, "LZX 1.21") == 0)
     {
       strcpy(lzx_extract_command, "-q -x e");
       strcpy(lzx_extract_target_command, "  ");
+      unlzx_is_216 = false;
       printf("UnLZX version recognised as LZX 1.21 \n");
     }
     else
@@ -1508,7 +1640,7 @@ int main(int argc, char *argv[])
     printf(
         "\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
         "<output_directory_path> [-enablespacecheck (experimental)] "
-        "[-testarchivesonly] [-skipifdestexists] [-quietskips] [-enablecustomicons] \n\n");
+        "[-testarchivesonly] [-skipifdestexists] [-quietskips] [-enablecustomicons] [-debug] \n\n");
     return 1;
   }
 
@@ -1538,6 +1670,49 @@ int main(int argc, char *argv[])
     {
       quiet_skips = true;
     }
+    if (strcmp(argv[i], "-debug") == 0)
+    {
+      debug_mode = true;
+    }
+  }
+
+  if (debug_mode)
+  {
+    if (build_timestamped_log_filename("error", debug_log_filename, sizeof(debug_log_filename)))
+    {
+      append_log_line(debug_log_filename, "debug logging enabled");
+    }
+    else
+    {
+      debug_mode = false;
+      printf("Warning: unable to create debug log filename; debug logging disabled.\n");
+    }
+  }
+
+  if (skip_if_dest_exists && !test_archives_only)
+  {
+    if (build_timestamped_log_filename("New", new_extract_log_filename, sizeof(new_extract_log_filename)))
+    {
+      new_extract_log_enabled = 1;
+    }
+    else
+    {
+      new_extract_log_enabled = 0;
+      printf("Warning: unable to create New extraction log filename; New archive logging disabled.\n");
+    }
+  }
+
+  if (test_archives_only)
+  {
+    if (build_timestamped_log_filename("test_errors", test_errors_log_filename, sizeof(test_errors_log_filename)))
+    {
+      test_errors_log_enabled = 1;
+    }
+    else
+    {
+      test_errors_log_enabled = 0;
+      printf("Warning: unable to create test error log filename; test error logging disabled.\n");
+    }
   }
 
   drawer_icon_options.use_custom_icons = enable_custom_icons ? TRUE : FALSE;
@@ -1564,6 +1739,36 @@ int main(int argc, char *argv[])
   else
   {
     printf("\x1B[1mSkip logging:\x1B[0m normal\n");
+  }
+  if (debug_mode)
+  {
+    printf("\x1B[1mDebug logging:\x1B[0m enabled (%s)\n", debug_log_filename);
+  }
+  else
+  {
+    printf("\x1B[1mDebug logging:\x1B[0m disabled\n");
+  }
+  if (test_archives_only)
+  {
+    if (test_errors_log_enabled)
+    {
+      printf("\x1B[1mTest errors log:\x1B[0m enabled (%s)\n", test_errors_log_filename);
+    }
+    else
+    {
+      printf("\x1B[1mTest errors log:\x1B[0m disabled\n");
+    }
+  }
+  if (skip_if_dest_exists)
+  {
+    if (new_extract_log_enabled)
+    {
+      printf("\x1B[1mNew archive log:\x1B[0m enabled (%s)\n", new_extract_log_filename);
+    }
+    else if (!test_archives_only)
+    {
+      printf("\x1B[1mNew archive log:\x1B[0m disabled\n");
+    }
   }
 
   if (does_folder_exists(input_directory_path) == 0)
@@ -1602,31 +1807,18 @@ int main(int argc, char *argv[])
   hours = elapsed_seconds / 3600;
   minutes = (elapsed_seconds % 3600) / 60;
   seconds = elapsed_seconds % 60;
+  printf("\n------------------------------------------\n\n");
   printf(
-      "Scanned \x1B[1m%d\x1B[0m directories and found \x1B[1m%d\x1B[0m "
-      "archives.\n",
-      num_directories_scanned, num_lha_archives_found + num_lzx_archives_found);
+      "Scanned: \x1B[1m%d\x1B[0m dirs | Archives: \x1B[1m%d\x1B[0m (LHA \x1B[1m%d\x1B[0m, LZX \x1B[1m%d\x1B[0m)\n",
+      num_directories_scanned,
+      num_lha_archives_found + num_lzx_archives_found,
+      num_lha_archives_found,
+      num_lzx_archives_found);
   printf(
-      "Archives composed of \x1B[1m%d\x1B[0m LHA and \x1B[1m%d\x1B[0m "
-      "LZX archives.\n",
-      num_lha_archives_found, num_lzx_archives_found);
-    printf(
-      "Archives extracted: \x1B[1m%d\x1B[0m\n",
-      num_archives_extracted);
-
-  if (num_archives_skipped_dest_exists > 0)
-  {
-    printf(
-        "Skipped because destination existed: \x1B[1m%d\x1B[0m\n",
-        num_archives_skipped_dest_exists);
-  }
-
-  if (num_destination_conflicts > 0)
-  {
-    printf(
-        "Destination conflicts detected: \x1B[1m%d\x1B[0m\n",
-        num_destination_conflicts);
-  }
+      "Extracted: \x1B[1m%d\x1B[0m | Skipped: \x1B[1m%d\x1B[0m | Conflicts: \x1B[1m%d\x1B[0m\n",
+      num_archives_extracted,
+      num_archives_skipped_dest_exists,
+      num_destination_conflicts);
 
   if (num_destination_not_drawer_conflicts > 0)
   {
@@ -1637,15 +1829,14 @@ int main(int argc, char *argv[])
 
   if (conflict_sample_count > 0)
   {
-    int i;
-    printf("Sample destination conflicts (up to %d):\n", MAX_CONFLICT_SAMPLES);
-    for (i = 0; i < conflict_sample_count; i++)
+    int remaining_conflict_samples;
+
+    printf("Conflict sample: \x1B[1m%s\x1B[0m\n", destination_conflict_samples[0]);
+
+    remaining_conflict_samples = (conflict_sample_count - 1) + conflict_sample_omitted_count;
+    if (remaining_conflict_samples > 0)
     {
-      printf("  %d. \x1B[1m%s\x1B[0m\n", i + 1, destination_conflict_samples[i]);
-    }
-    if (conflict_sample_omitted_count > 0)
-    {
-      printf("  ...and \x1B[1m%d\x1B[0m more\n", conflict_sample_omitted_count);
+      printf("More conflict samples: \x1B[1m%d\x1B[0m\n", remaining_conflict_samples);
     }
   }
 
@@ -1659,7 +1850,7 @@ int main(int argc, char *argv[])
   if (enable_custom_icons)
   {
     printf(
-        "Drawer icons attempted: \x1B[1m%d\x1B[0m, applied: \x1B[1m%d\x1B[0m\n",
+        "Icons: tried \x1B[1m%d\x1B[0m, applied \x1B[1m%d\x1B[0m\n",
         num_drawer_icons_attempted,
         num_drawer_icons_applied);
 
@@ -1682,13 +1873,31 @@ int main(int argc, char *argv[])
     }
   }
 
-  if (quiet_skips)
+  if (test_archives_only && num_lzx_archives_skipped_test_unsupported > 0)
   {
-    printf("Summary note: quiet skip logging was enabled (-quietskips).\n");
+    printf("LZX archives skipped in test mode (UnLZX 2.16 limitation): \x1B[1m%d\x1B[0m\n", num_lzx_archives_skipped_test_unsupported);
   }
 
-  printf("\nElapsed time: \x1B[1m%ld:%02ld:%02ld\x1B[0m\n", hours, minutes, seconds);
-  print_errors();
+  if (quiet_skips)
+  {
+    printf("Note: quiet skips on (-quietskips)\n");
+  }
+
+  if (skip_if_dest_exists && new_extract_log_enabled)
+  {
+    printf("New archives logged: \x1B[1m%d\x1B[0m (%s)\n", new_extract_log_count, new_extract_log_filename);
+  }
+
+  if (test_archives_only && test_errors_log_enabled && test_errors_log_count > 0)
+  {
+    printf("Test errors logged: \x1B[1m%d\x1B[0m (%s)\n", test_errors_log_count, test_errors_log_filename);
+  }
+
+  printf("Time: \x1B[1m%ld:%02ld:%02ld\x1B[0m | Errors: \x1B[1m%d\x1B[0m\n", hours, minutes, seconds, error_count);
+  if (error_count > 0)
+  {
+    print_errors();
+  }
   printf("\nWHDArchiveExtractor V%s\n\n", VERSION_STRING);
   return 0;
 }

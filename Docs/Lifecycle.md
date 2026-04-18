@@ -35,6 +35,8 @@ WHDArchiveExtractor <source_directory> <output_directory> [-enablespacecheck] [-
 | `-quietskips`         | Hides per-archive skip lines while keeping periodic progress heartbeat output. |
 | `-enablecustomicons`  | Applies custom drawer icons to newly created destination drawers. |
 
+Option name note: use `-enablespacecheck`.
+
 After parsing, trailing slashes are stripped from both paths with `remove_trailing_slash()`.
 
 ---
