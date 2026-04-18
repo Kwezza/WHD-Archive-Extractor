@@ -53,6 +53,10 @@
 */  
 
 
+/* ========================================================================== */
+/* SECTION: INCLUDES                                                          */
+/* ========================================================================== */
+
 #include <ctype.h>
 #include <dos/dos.h>
 #include <exec/memory.h>
@@ -67,6 +71,10 @@
 #include <workbench/icon.h>
 
 
+
+/* ========================================================================== */
+/* SECTION: CONSTANTS, MACROS, ENUMS, GLOBALS                                 */
+/* ========================================================================== */
 
 #define bool int
 #define true 1
@@ -125,7 +133,10 @@ STRPTR input_directory_path;
 STRPTR output_directory_path;
 icon_applier_options drawer_icon_options = {FALSE, ICON_APPLIER_DEFAULT_ICONS_DIR};
 
-/* Function prototypes */
+/* ========================================================================== */
+/* SECTION: FORWARD DECLARATIONS                                              */
+/* ========================================================================== */
+
 char *get_file_path(const char *full_path);
 char *remove_text(char *input_str, STRPTR text_to_remove);
 int   check_disk_space(STRPTR path, int min_space_mb);
@@ -154,6 +165,10 @@ BOOL  icon_applier_ensure_drawer_icon(const char *dir_path, const icon_applier_o
 char *get_executable_version(const char *filePath);
 void  record_destination_conflict_sample(const char *destination_path);
 
+/* ========================================================================== */
+/* SECTION: RUNTIME COUNTERS AND STATS                                        */
+/* ========================================================================== */
+
 int num_lzx_archives_found = 0;
 int num_lha_archives_found = 0;
 int num_archives_skipped_dest_exists = 0;
@@ -171,53 +186,15 @@ int conflict_sample_omitted_count = 0;
 
 #define QUIET_HEARTBEAT_INTERVAL 250
 
-void maybe_print_quiet_heartbeat(void)
-{
-  if (quiet_skips && (num_directories_scanned % QUIET_HEARTBEAT_INTERVAL) == 0)
-  {
-    printf("[quiet] Scan heartbeat: scanned \x1B[1m%d\x1B[0m entries, archives found \x1B[1m%d\x1B[0m\n",
-           num_directories_scanned,
-           num_lha_archives_found + num_lzx_archives_found);
-  }
-}
+/* ========================================================================== */
+/* SECTION: ARGUMENT PARSING                                                  */
+/* ========================================================================== */
 
-void record_destination_conflict_sample(const char *destination_path)
-{
-  const char *relative_path;
-  int i;
+/* Argument parsing is intentionally kept in main() as part of startup flow. */
 
-  if (destination_path == NULL || output_directory_path == NULL)
-  {
-    return;
-  }
-
-  relative_path = remove_text((char *)destination_path, output_directory_path);
-  if (relative_path == NULL || relative_path[0] == '\0')
-  {
-    return;
-  }
-
-  for (i = 0; i < conflict_sample_count; i++)
-  {
-    if (strcmp(destination_conflict_samples[i], relative_path) == 0)
-    {
-      return;
-    }
-  }
-
-  if (conflict_sample_count < MAX_CONFLICT_SAMPLES)
-  {
-    strncpy(destination_conflict_samples[conflict_sample_count], relative_path, MAX_PATH_LENGTH - 1);
-    destination_conflict_samples[conflict_sample_count][MAX_PATH_LENGTH - 1] = '\0';
-    conflict_sample_count++;
-  }
-  else
-  {
-    conflict_sample_omitted_count++;
-  }
-}
-
-
+/* ========================================================================== */
+/* SECTION: PATH AND FILENAME HELPERS                                         */
+/* ========================================================================== */
 
 /**
  * @brief Sanitizes an Amiga file path in-place by correcting specific path issues.
@@ -282,154 +259,6 @@ void sanitize_amiga_path(char *path)
   /* Copy back to the original path and free the allocated memory */
   strcpy(path, sanitizedPath);
   FreeVec(sanitizedPath);
-}
-
-BOOL icon_applier_exists(const char *path)
-{
-  BPTR lock;
-
-  if (path == NULL || path[0] == '\0')
-  {
-    return FALSE;
-  }
-
-  lock = Lock((CONST_STRPTR)path, ACCESS_READ);
-  if (lock == 0)
-  {
-    return FALSE;
-  }
-
-  UnLock(lock);
-  return TRUE;
-}
-
-void icon_applier_sanitize_path(char *path)
-{
-  size_t i;
-
-  if (path == NULL)
-  {
-    return;
-  }
-
-  sanitize_amiga_path(path);
-
-  for (i = 0; path[i] != '\0'; i++)
-  {
-    if (((unsigned char)path[i] < 32U) || strchr("*?#|<>\"{}", path[i]) != NULL)
-    {
-      path[i] = '_';
-    }
-  }
-
-  remove_trailing_slash(path);
-}
-
-const char *icon_applier_get_icons_dir(const icon_applier_options *options)
-{
-  if (options == NULL || options->icons_dir == NULL || options->icons_dir[0] == '\0')
-  {
-    return ICON_APPLIER_DEFAULT_ICONS_DIR;
-  }
-
-  return options->icons_dir;
-}
-
-BOOL icon_applier_ensure_drawer_icon(const char *dir_path, const icon_applier_options *options)
-{
-  size_t dir_path_length;
-  size_t icons_dir_length;
-  size_t leaf_name_length;
-  char info_path[ICON_APPLIER_MAX_PATH];
-  char source_icon_name[ICON_APPLIER_MAX_PATH];
-  const char *leaf_name;
-  const char *icons_dir;
-  const char *slash;
-  const char *colon;
-  struct DiskObject *diskobj;
-  static int icons_dir_checked = 0;
-  static BOOL icons_dir_exists = FALSE;
-
-  if (dir_path == NULL || options == NULL)
-  {
-    return FALSE;
-  }
-
-  dir_path_length = strlen(dir_path);
-  if (dir_path_length + 5 >= sizeof(info_path))
-  {
-    return FALSE;
-  }
-
-  strcpy(info_path, dir_path);
-  strcat(info_path, ".info");
-  icon_applier_sanitize_path(info_path);
-
-  /* Preserve existing icon files for drawers that already have one. */
-  if (icon_applier_exists(info_path))
-  {
-    return TRUE;
-  }
-
-  slash = strrchr(dir_path, '/');
-  if (slash != NULL)
-  {
-    leaf_name = slash + 1;
-  }
-  else
-  {
-    colon = strrchr(dir_path, ':');
-    leaf_name = (colon != NULL) ? (colon + 1) : dir_path;
-  }
-
-  if (leaf_name[0] == '\0')
-  {
-    return FALSE;
-  }
-
-  diskobj = NULL;
-  icons_dir = icon_applier_get_icons_dir(options);
-
-  if (options->use_custom_icons)
-  {
-    if (!icons_dir_checked)
-    {
-      icons_dir_exists = icon_applier_exists(icons_dir);
-      icons_dir_checked = 1;
-    }
-
-    if (icons_dir_exists)
-    {
-      icons_dir_length = strlen(icons_dir);
-      leaf_name_length = strlen(leaf_name);
-      if (icons_dir_length + leaf_name_length + 2 < sizeof(source_icon_name))
-      {
-        strcpy(source_icon_name, icons_dir);
-        strcat(source_icon_name, "/");
-        strcat(source_icon_name, leaf_name);
-        icon_applier_sanitize_path(source_icon_name);
-        diskobj = GetDiskObject((CONST_STRPTR)source_icon_name);
-      }
-    }
-  }
-
-  if (diskobj == NULL)
-  {
-    diskobj = GetDefDiskObject(WBDRAWER);
-    if (diskobj == NULL)
-    {
-      return FALSE;
-    }
-  }
-
-  if (!PutDiskObject((CONST_STRPTR)dir_path, diskobj))
-  {
-    FreeDiskObject(diskobj);
-    return FALSE;
-  }
-
-  FreeDiskObject(diskobj);
-  return TRUE;
 }
 
 /**
@@ -520,6 +349,118 @@ char *get_file_path(const char *full_path)
   return file_path;
 }
 
+char *get_executable_version(const char *filePath)
+{
+    char command[256];
+    char *versionBuffer = NULL;
+    FILE *versionFile;
+    char line[256];
+    int len;
+  size_t needed;
+
+  if (filePath == NULL)
+  {
+    return NULL;
+  }
+
+    /* Create and execute the version command */
+  needed = strlen("version ") + strlen(filePath) + strlen(" >ram:v.txt") + 1;
+  if (needed > sizeof(command))
+  {
+    return NULL;
+  }
+
+  strcpy(command, "version ");
+  strcat(command, filePath);
+  strcat(command, " >ram:v.txt");
+    SystemTagList((CONST_STRPTR)command, NULL);
+
+    /* Open the version file */
+    versionFile = fopen("ram:v.txt", "r");
+    if (versionFile != NULL)
+    {
+        /* Read the first line */
+        if (fgets(line, sizeof(line), versionFile) != NULL)
+        {
+            /* Remove trailing whitespace */
+            len = strlen(line);
+            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' || line[len-1] == ' '))
+            {
+                line[--len] = '\0';
+            }
+
+            /* Allocate memory for the version string */
+            versionBuffer = AllocVec(len + 1, MEMF_CLEAR);
+            if (versionBuffer != NULL)
+            {
+                strcpy(versionBuffer, line);
+            }
+        }
+        fclose(versionFile);
+    }
+
+    /* Delete the temporary file */
+    DeleteFile("ram:v.txt");
+
+    return versionBuffer;
+}
+
+/**
+ * @brief Removes a trailing slash from a string, if present.
+ *
+ * Modifies the input string in-place to remove a trailing '/' character, if it exists.
+ *
+ * @param str The string to modify. Must be a writable, null-terminated string.
+ */
+void remove_trailing_slash(char *str)
+{
+  if (str != NULL && strlen(str) > 0 && str[strlen(str) - 1] == '/')
+  {
+    str[strlen(str) - 1] = '\0';
+  }
+}
+
+/* ========================================================================== */
+/* SECTION: ARCHIVE-TYPE DETECTION AND COMMAND BUILDING                       */
+/* ========================================================================== */
+
+char *find_first_directory(char *filePath)
+{
+  static char directoryName[256]; /* Static buffer to hold the directory name */
+  FILE *file;
+  char line[256]; /* Buffer to read each line into */
+
+  if (does_file_exist(filePath) == 0)
+  {
+    printf("File does not exist: %s\n", filePath);
+    return NULL; /* Return NULL if file can't be opened */
+  }
+
+  /* Open the file for reading */
+  if ((file = fopen(filePath, "r")) == NULL)
+  {
+    return NULL; /* Return NULL if file can't be opened */
+  }
+
+  while (fgets(line, sizeof(line), file) != NULL)
+  {                                          /* Read each line */
+    char *slashPosition = strchr(line, '/'); /* Find the first '/' */
+    if (slashPosition != NULL)
+    {
+      /* Calculate the directory name length */
+      int dirLength = slashPosition - line;
+      /* Copy the directory name to the static buffer */
+      strncpy(directoryName, line, dirLength);
+      directoryName[dirLength] = '\0'; /* Null-terminate the string */
+      fclose(file);                    /* Close the file */
+      return directoryName;            /* Return the directory name */
+    }
+  }
+
+  fclose(file); /* Close the file if no directory is found */
+  return NULL;  /* Return NULL if no directory is found */
+}
+
 /**
  * @brief Checks if a file exists by attempting to open it for reading.
  *
@@ -528,6 +469,10 @@ char *get_file_path(const char *full_path)
  * @param filename The name (and path) of the file to check.
  * @return 1 if the file exists, 0 otherwise.
  */
+/* ========================================================================== */
+/* SECTION: DESTINATION RESOLUTION AND SKIP LOGIC                             */
+/* ========================================================================== */
+
 int does_file_exist(char *filename)
 {
   FILE *file;
@@ -606,6 +551,96 @@ int get_path_state(const char *path)
   UnLock(lock);
   return path_state;
 }
+
+int is_destination_claimed(const char *destination_path, char *claimed_destinations[], int claimed_destinations_count)
+{
+  int i;
+
+  for (i = 0; i < claimed_destinations_count; i++)
+  {
+    if (strcmp(claimed_destinations[i], destination_path) == 0)
+    {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+int add_claimed_destination(const char *destination_path, char *claimed_destinations[], int *claimed_destinations_count)
+{
+  size_t destination_length;
+
+  if (*claimed_destinations_count >= MAX_TRACKED_DESTINATIONS)
+  {
+    return 0;
+  }
+
+  destination_length = strlen(destination_path) + 1;
+  claimed_destinations[*claimed_destinations_count] = (char *)AllocVec(destination_length, MEMF_ANY);
+  if (claimed_destinations[*claimed_destinations_count] == NULL)
+  {
+    return 0;
+  }
+
+  strcpy(claimed_destinations[*claimed_destinations_count], destination_path);
+  (*claimed_destinations_count)++;
+  return 1;
+}
+
+void free_claimed_destinations(char *claimed_destinations[], int claimed_destinations_count)
+{
+  int i;
+
+  for (i = 0; i < claimed_destinations_count; i++)
+  {
+    if (claimed_destinations[i] != NULL)
+    {
+      FreeVec(claimed_destinations[i]);
+      claimed_destinations[i] = NULL;
+    }
+  }
+}
+
+void record_destination_conflict_sample(const char *destination_path)
+{
+  const char *relative_path;
+  int i;
+
+  if (destination_path == NULL || output_directory_path == NULL)
+  {
+    return;
+  }
+
+  relative_path = remove_text((char *)destination_path, output_directory_path);
+  if (relative_path == NULL || relative_path[0] == '\0')
+  {
+    return;
+  }
+
+  for (i = 0; i < conflict_sample_count; i++)
+  {
+    if (strcmp(destination_conflict_samples[i], relative_path) == 0)
+    {
+      return;
+    }
+  }
+
+  if (conflict_sample_count < MAX_CONFLICT_SAMPLES)
+  {
+    strncpy(destination_conflict_samples[conflict_sample_count], relative_path, MAX_PATH_LENGTH - 1);
+    destination_conflict_samples[conflict_sample_count][MAX_PATH_LENGTH - 1] = '\0';
+    conflict_sample_count++;
+  }
+  else
+  {
+    conflict_sample_omitted_count++;
+  }
+}
+
+/* ========================================================================== */
+/* SECTION: DIRECTORY PREPARATION                                             */
+/* ========================================================================== */
 
 int ensure_directory_exists(const char *path, int *created)
 {
@@ -774,70 +809,220 @@ int ensure_path_directories(const char *base_root, const char *full_target_path,
   return 1;
 }
 
-int is_destination_claimed(const char *destination_path, char *claimed_destinations[], int claimed_destinations_count)
-{
-  int i;
+/* ========================================================================== */
+/* SECTION: ICON HELPER LOGIC                                                 */
+/* ========================================================================== */
 
-  for (i = 0; i < claimed_destinations_count; i++)
+BOOL icon_applier_exists(const char *path)
+{
+  BPTR lock;
+
+  if (path == NULL || path[0] == '\0')
   {
-    if (strcmp(claimed_destinations[i], destination_path) == 0)
+    return FALSE;
+  }
+
+  lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+  if (lock == 0)
+  {
+    return FALSE;
+  }
+
+  UnLock(lock);
+  return TRUE;
+}
+
+void icon_applier_sanitize_path(char *path)
+{
+  size_t i;
+
+  if (path == NULL)
+  {
+    return;
+  }
+
+  sanitize_amiga_path(path);
+
+  for (i = 0; path[i] != '\0'; i++)
+  {
+    if (((unsigned char)path[i] < 32U) || strchr("*?#|<>\"{}", path[i]) != NULL)
     {
-      return 1;
+      path[i] = '_';
     }
   }
 
-  return 0;
+  remove_trailing_slash(path);
 }
 
-int add_claimed_destination(const char *destination_path, char *claimed_destinations[], int *claimed_destinations_count)
+const char *icon_applier_get_icons_dir(const icon_applier_options *options)
 {
-  size_t destination_length;
-
-  if (*claimed_destinations_count >= MAX_TRACKED_DESTINATIONS)
+  if (options == NULL || options->icons_dir == NULL || options->icons_dir[0] == '\0')
   {
-    return 0;
+    return ICON_APPLIER_DEFAULT_ICONS_DIR;
   }
 
-  destination_length = strlen(destination_path) + 1;
-  claimed_destinations[*claimed_destinations_count] = (char *)AllocVec(destination_length, MEMF_ANY);
-  if (claimed_destinations[*claimed_destinations_count] == NULL)
-  {
-    return 0;
-  }
-
-  strcpy(claimed_destinations[*claimed_destinations_count], destination_path);
-  (*claimed_destinations_count)++;
-  return 1;
+  return options->icons_dir;
 }
 
-void free_claimed_destinations(char *claimed_destinations[], int claimed_destinations_count)
+BOOL icon_applier_ensure_drawer_icon(const char *dir_path, const icon_applier_options *options)
 {
-  int i;
+  size_t dir_path_length;
+  size_t icons_dir_length;
+  size_t leaf_name_length;
+  char info_path[ICON_APPLIER_MAX_PATH];
+  char source_icon_name[ICON_APPLIER_MAX_PATH];
+  const char *leaf_name;
+  const char *icons_dir;
+  const char *slash;
+  const char *colon;
+  struct DiskObject *diskobj;
+  static int icons_dir_checked = 0;
+  static BOOL icons_dir_exists = FALSE;
 
-  for (i = 0; i < claimed_destinations_count; i++)
+  if (dir_path == NULL || options == NULL)
   {
-    if (claimed_destinations[i] != NULL)
+    return FALSE;
+  }
+
+  dir_path_length = strlen(dir_path);
+  if (dir_path_length + 5 >= sizeof(info_path))
+  {
+    return FALSE;
+  }
+
+  strcpy(info_path, dir_path);
+  strcat(info_path, ".info");
+  icon_applier_sanitize_path(info_path);
+
+  /* Preserve existing icon files for drawers that already have one. */
+  if (icon_applier_exists(info_path))
+  {
+    return TRUE;
+  }
+
+  slash = strrchr(dir_path, '/');
+  if (slash != NULL)
+  {
+    leaf_name = slash + 1;
+  }
+  else
+  {
+    colon = strrchr(dir_path, ':');
+    leaf_name = (colon != NULL) ? (colon + 1) : dir_path;
+  }
+
+  if (leaf_name[0] == '\0')
+  {
+    return FALSE;
+  }
+
+  diskobj = NULL;
+  icons_dir = icon_applier_get_icons_dir(options);
+
+  if (options->use_custom_icons)
+  {
+    if (!icons_dir_checked)
     {
-      FreeVec(claimed_destinations[i]);
-      claimed_destinations[i] = NULL;
+      icons_dir_exists = icon_applier_exists(icons_dir);
+      icons_dir_checked = 1;
+    }
+
+    if (icons_dir_exists)
+    {
+      icons_dir_length = strlen(icons_dir);
+      leaf_name_length = strlen(leaf_name);
+      if (icons_dir_length + leaf_name_length + 2 < sizeof(source_icon_name))
+      {
+        strcpy(source_icon_name, icons_dir);
+        strcat(source_icon_name, "/");
+        strcat(source_icon_name, leaf_name);
+        icon_applier_sanitize_path(source_icon_name);
+        diskobj = GetDiskObject((CONST_STRPTR)source_icon_name);
+      }
     }
   }
+
+  if (diskobj == NULL)
+  {
+    diskobj = GetDefDiskObject(WBDRAWER);
+    if (diskobj == NULL)
+    {
+      return FALSE;
+    }
+  }
+
+  if (!PutDiskObject((CONST_STRPTR)dir_path, diskobj))
+  {
+    FreeDiskObject(diskobj);
+    return FALSE;
+  }
+
+  FreeDiskObject(diskobj);
+  return TRUE;
 }
 
-/**
- * @brief Removes a trailing slash from a string, if present.
- *
- * Modifies the input string in-place to remove a trailing '/' character, if it exists.
- *
- * @param str The string to modify. Must be a writable, null-terminated string.
- */
-void remove_trailing_slash(char *str)
+/* ========================================================================== */
+/* SECTION: TEST-MODE LOGIC                                                   */
+/* ========================================================================== */
+
+void maybe_print_quiet_heartbeat(void)
 {
-  if (str != NULL && strlen(str) > 0 && str[strlen(str) - 1] == '/')
+  if (quiet_skips && (num_directories_scanned % QUIET_HEARTBEAT_INTERVAL) == 0)
   {
-    str[strlen(str) - 1] = '\0';
+    printf("[quiet] Scan heartbeat: scanned \x1B[1m%d\x1B[0m entries, archives found \x1B[1m%d\x1B[0m\n",
+           num_directories_scanned,
+           num_lha_archives_found + num_lzx_archives_found);
   }
 }
+
+int check_disk_space(STRPTR path, int min_space_mb)
+{
+  struct InfoData *info = AllocMem(sizeof(struct InfoData), MEMF_CLEAR);
+  BPTR lock = Lock(path, ACCESS_READ);
+  long free_space;
+  int result;
+
+  if (!info)
+    return -1; /* Allocation failed, can't check disk space */
+  if (!lock)
+  {
+    FreeMem(info, sizeof(struct InfoData));
+    return -2; /* Unable to lock the path, can't check disk space */
+  }
+
+  result = 0; /* Default to 0, meaning there's enough space */
+
+  if (Info(lock, info))
+  {
+    /* Convert available blocks to bytes and then to megabytes */
+    free_space = ((long)info->id_NumBlocks - (long)info->id_NumBlocksUsed) * (long)info->id_BytesPerBlock / 1024 / 1024;
+
+#ifdef DEBUG
+    printf("Free space: %ld\n", free_space);
+#endif
+
+    if (free_space < 0)
+    {
+      result = 0; /* Assume very large disk, so return 0 */
+    }
+    else if (free_space < min_space_mb)
+    {
+      result = -3; /* Not enough space */
+    }
+  }
+  else
+  {
+    result = -4; /* Info call failed */
+  }
+
+  UnLock(lock);
+  FreeMem(info, sizeof(struct InfoData));
+  return result;
+}
+
+/* ========================================================================== */
+/* SECTION: LOGGING AND SUMMARY OUTPUT                                        */
+/* ========================================================================== */
 
 /**
  * @brief Logs an error message to the error message array.
@@ -944,42 +1129,9 @@ int build_timestamped_log_filename(const char *prefix, char *output_buffer, size
   return 1;
 }
 
-char *find_first_directory(char *filePath)
-{
-  static char directoryName[256]; /* Static buffer to hold the directory name */
-  FILE *file;
-  char line[256]; /* Buffer to read each line into */
-
-  if (does_file_exist(filePath) == 0)
-  {
-    printf("File does not exist: %s\n", filePath);
-    return NULL; /* Return NULL if file can't be opened */
-  }
-
-  /* Open the file for reading */
-  if ((file = fopen(filePath, "r")) == NULL)
-  {
-    return NULL; /* Return NULL if file can't be opened */
-  }
-
-  while (fgets(line, sizeof(line), file) != NULL)
-  {                                          /* Read each line */
-    char *slashPosition = strchr(line, '/'); /* Find the first '/' */
-    if (slashPosition != NULL)
-    {
-      /* Calculate the directory name length */
-      int dirLength = slashPosition - line;
-      /* Copy the directory name to the static buffer */
-      strncpy(directoryName, line, dirLength);
-      directoryName[dirLength] = '\0'; /* Null-terminate the string */
-      fclose(file);                    /* Close the file */
-      return directoryName;            /* Return the directory name */
-    }
-  }
-
-  fclose(file); /* Close the file if no directory is found */
-  return NULL;  /* Return NULL if no directory is found */
-}
+/* ========================================================================== */
+/* SECTION: MAIN SCAN/EXTRACT FLOW                                            */
+/* ========================================================================== */
 
 void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path)
 {
@@ -1006,8 +1158,8 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   char program_name[16];
   char fileCommandStore[256];
   LONG command_result;
-  char *file_path_tmp = NULL;
-  size_t needed = 0;
+  char *file_path_tmp;
+  size_t needed;
   struct FileInfoBlock *file_info_block;
 
   folder_claimed_destinations_count = 0;
@@ -1059,6 +1211,10 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
 
               if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
               {
+                /* ------------------------------------------------------------ */
+                /* ARCHIVE-TYPE DETECTION AND COMMAND BUILDING                 */
+                /* ------------------------------------------------------------ */
+
                 file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
                 if (file_path_tmp) {
                     needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1;
@@ -1070,7 +1226,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                         printf("Error: Path too long for fileCommandStore buffer.\n");
                         log_error("Path too long for fileCommandStore buffer.");
                         FreeVec(file_path_tmp);
-                        file_path_tmp = NULL;
                         continue;
                     }
                 } else {
@@ -1092,7 +1247,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   printf("Error: Path too long for destination_drawer_path buffer.\n");
                   log_error("Path too long for destination_drawer_path buffer.");
                   FreeVec(file_path_tmp);
-                  file_path_tmp = NULL;
                   continue;
                 }
                 strcpy(destination_drawer_path, fileCommandStore);
@@ -1139,6 +1293,11 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
 
                 destination_conflict_detected = 0;
                 destination_path_state = get_path_state(destination_drawer_path);
+
+                /* ------------------------------------------------------------ */
+                /* DESTINATION RESOLUTION AND SKIP LOGIC                        */
+                /* ------------------------------------------------------------ */
+
                 if (destination_path_state == -1)
                 {
                   printf("Conflict: destination path exists but is not a drawer: \x1B[1m%s\x1B[0m\n", destination_drawer_path);
@@ -1167,7 +1326,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 if (destination_conflict_detected)
                 {
                   FreeVec(file_path_tmp);
-                  file_path_tmp = NULL;
                   continue;
                 }
 
@@ -1180,7 +1338,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   }
                   num_archives_skipped_dest_exists++;
                   FreeVec(file_path_tmp);
-                  file_path_tmp = NULL;
                   continue;
                 }
 
@@ -1193,7 +1350,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
                 }
                 FreeVec(file_path_tmp);
-                file_path_tmp = NULL;
                 if (strcmp(file_extension, ".LHA") == 0)
                 {
                   num_lha_archives_found++;
@@ -1228,7 +1384,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                                 printf("Error: Path too long for fileCommandStore buffer.\n");
                                 log_error("Path too long for fileCommandStore buffer.");
                                 FreeVec(file_path_tmp);
-                                file_path_tmp = NULL;
                                 continue;
                             }
                         } else {
@@ -1254,7 +1409,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                                   printf("Error: Path too long for fileCommandStore buffer (protect).\n");
                                   log_error("Error: Path too long for extraction_command buffer.");
                                   FreeVec(file_path_tmp);
-                                  file_path_tmp = NULL;
                                   continue;
                               }
                           } else {
@@ -1270,7 +1424,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                           file_path_tmp = NULL;
                         }
                         FreeVec(file_path_tmp);
-                        file_path_tmp = NULL;
                       }
                       else
                       {
@@ -1359,6 +1512,10 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 {
                   num_archives_found++;
 
+                  /* ---------------------------------------------------------- */
+                  /* ARCHIVE-TYPE COMMAND EXECUTION                             */
+                  /* ---------------------------------------------------------- */
+
                   /* Combine the extraction command, source
                    * path, and output path */
                   file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
@@ -1381,7 +1538,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                           printf("Error: Path too long for extraction_command buffer.\n");
                           log_error("Error: Path too long for extraction_command buffer.");
                           FreeVec(file_path_tmp);
-                          file_path_tmp = NULL;
                           continue;
                       }
                   } else {
@@ -1390,7 +1546,6 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   }
                   sanitize_amiga_path(extraction_command);
                   FreeVec(file_path_tmp);
-                  file_path_tmp = NULL;
 
 
 
@@ -1515,56 +1670,19 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   free_claimed_destinations(folder_claimed_destinations, folder_claimed_destinations_count);
 }
 
-int check_disk_space(STRPTR path, int min_space_mb)
-{
-  struct InfoData *info = AllocMem(sizeof(struct InfoData), MEMF_CLEAR);
-  BPTR lock = Lock(path, ACCESS_READ);
-  long free_space;
-  int result;
-
-  if (!info)
-    return -1; /* Allocation failed, can't check disk space */
-  if (!lock)
-  {
-    FreeMem(info, sizeof(struct InfoData));
-    return -2; /* Unable to lock the path, can't check disk space */
-  }
-
-  result = 0; /* Default to 0, meaning there's enough space */
-
-  if (Info(lock, info))
-  {
-    /* Convert available blocks to bytes and then to megabytes */
-    free_space = ((long)info->id_NumBlocks - (long)info->id_NumBlocksUsed) * (long)info->id_BytesPerBlock / 1024 / 1024;
-
-#ifdef DEBUG
-    printf("Free space: %ld\n", free_space);
-#endif
-
-    if (free_space < 0)
-    {
-      result = 0; /* Assume very large disk, so return 0 */
-    }
-    else if (free_space < min_space_mb)
-    {
-      result = -3; /* Not enough space */
-    }
-  }
-  else
-  {
-    result = -4; /* Info call failed */
-  }
-
-  UnLock(lock);
-  FreeMem(info, sizeof(struct InfoData));
-  return result;
-}
+/* ========================================================================== */
+/* SECTION: MAIN()                                                            */
+/* ========================================================================== */
 
 int main(int argc, char *argv[])
 {
   int i, disk_check_result;
   long elapsed_seconds, hours, minutes, seconds;
   char *versionInfo;
+
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: startup banner and tool availability checks              */
+  /* ------------------------------------------------------------------------ */
 
   /* Black text:  printf("\x1B[30m 30:\x1B[0m \n"); */
   /* White text:  printf("\x1B[31m 31:\x1B[0m \n"); */
@@ -1644,6 +1762,10 @@ int main(int argc, char *argv[])
     return 1;
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: argument parsing                                         */
+  /* ------------------------------------------------------------------------ */
+
   input_directory_path = argv[1];
   output_directory_path = argv[2];
 
@@ -1688,6 +1810,10 @@ int main(int argc, char *argv[])
       printf("Warning: unable to create debug log filename; debug logging disabled.\n");
     }
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: destination resolution, mode setup and preflight checks  */
+  /* ------------------------------------------------------------------------ */
 
   if (skip_if_dest_exists && !test_archives_only)
   {
@@ -1800,6 +1926,10 @@ int main(int argc, char *argv[])
   /* Start timer */
   start_time = time(NULL);
 
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: run scan and extraction flow                             */
+  /* ------------------------------------------------------------------------ */
+
   get_directory_contents(input_directory_path, output_directory_path);
 
   /* Calculate elapsed time */
@@ -1807,6 +1937,10 @@ int main(int argc, char *argv[])
   hours = elapsed_seconds / 3600;
   minutes = (elapsed_seconds % 3600) / 60;
   seconds = elapsed_seconds % 60;
+
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: logging and summary output                               */
+  /* ------------------------------------------------------------------------ */
   printf("\n------------------------------------------\n\n");
   printf(
       "Scanned: \x1B[1m%d\x1B[0m dirs | Archives: \x1B[1m%d\x1B[0m (LHA \x1B[1m%d\x1B[0m, LZX \x1B[1m%d\x1B[0m)\n",
@@ -1885,7 +2019,14 @@ int main(int argc, char *argv[])
 
   if (skip_if_dest_exists && new_extract_log_enabled)
   {
-    printf("New archives logged: \x1B[1m%d\x1B[0m (%s)\n", new_extract_log_count, new_extract_log_filename);
+    if (new_extract_log_count > 0)
+    {
+      printf("New archives logged: \x1B[1m%d\x1B[0m (%s)\n", new_extract_log_count, new_extract_log_filename);
+    }
+    else
+    {
+      printf("New archives logged: \x1B[1m0\x1B[0m\n");
+    }
   }
 
   if (test_archives_only && test_errors_log_enabled && test_errors_log_count > 0)
@@ -1902,59 +2043,4 @@ int main(int argc, char *argv[])
   return 0;
 }
 
-char *get_executable_version(const char *filePath)
-{
-    char command[256];
-    char *versionBuffer = NULL;
-    FILE *versionFile;
-    char line[256];
-    int len;
-  size_t needed;
-
-  if (filePath == NULL)
-  {
-    return NULL;
-  }
-
-    /* Create and execute the version command */
-  needed = strlen("version ") + strlen(filePath) + strlen(" >ram:v.txt") + 1;
-  if (needed > sizeof(command))
-  {
-    return NULL;
-  }
-
-  strcpy(command, "version ");
-  strcat(command, filePath);
-  strcat(command, " >ram:v.txt");
-    SystemTagList((CONST_STRPTR)command, NULL);
-
-    /* Open the version file */
-    versionFile = fopen("ram:v.txt", "r");
-    if (versionFile != NULL)
-    {
-        /* Read the first line */
-        if (fgets(line, sizeof(line), versionFile) != NULL)
-        {
-            /* Remove trailing whitespace */
-            len = strlen(line);
-            while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r' || line[len-1] == ' '))
-            {
-                line[--len] = '\0';
-            }
-
-            /* Allocate memory for the version string */
-            versionBuffer = AllocVec(len + 1, MEMF_CLEAR);
-            if (versionBuffer != NULL)
-            {
-                strcpy(versionBuffer, line);
-            }
-        }
-        fclose(versionFile);
-    }
-
-    /* Delete the temporary file */
-    DeleteFile("ram:v.txt");
-
-    return versionBuffer;
-}
 

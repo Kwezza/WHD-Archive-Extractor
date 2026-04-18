@@ -3,7 +3,7 @@ SC = sc
 LINK = slink
 
 # Compilation flags
-CFLAGS = noicon StackExtend
+CFLAGS = noicon StackExtend optimize optsize
 
 # Linker flags
 LFLAGS = 
@@ -18,4 +18,4 @@ WHDArchiveExtractor.o: WHDArchiveExtractor.c
     $(SC) $(CFLAGS) WHDArchiveExtractor.c 
 
 clean:
-    delete WHDArchiveExtractor.o WHDArchiveExtractor WHDArchiveExtractor.info WHDArchiveExtractor.lnk 
+    delete WHDArchiveExtractor.o WHDArchiveExtractor WHDArchiveExtractor.info WHDArchiveExtractor.lnk
