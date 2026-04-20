@@ -1,5 +1,28 @@
 # Developer Log
 
+## 2026-04-20 - Added automatic fallback to extractor-managed folder creation when destination prep fails
+
+This update hardens archive extraction against failures in the proactive destination drawer creation step.
+
+### Behavior
+
+- During normal extraction mode, destination drawer preparation still runs first.
+- If manual destination prep fails for an archive, that archive is no longer skipped immediately.
+- The program now prints a warning and falls back to extractor-managed folder creation for that archive.
+- If extraction then fails, existing error handling remains unchanged (error is logged and scan continues).
+
+### Visibility
+
+- A new summary line reports how many archives used this fallback path:
+  - `Destination drawer prep fallback used: <count>`
+- In `-debug` mode, fallback events append debug log lines including archive and destination context.
+
+### Scope
+
+- Applies only to normal extraction flow.
+- `-testarchivesonly` flow is unchanged.
+- Existing success-path behavior for directory creation and optional icon application is unchanged.
+
 ## 2026-04-18 - Corrected disk-check option name in runtime error message
 
 This update fixes inconsistent option naming in disk-space check failure guidance.
@@ -215,7 +238,7 @@ This update improves rerun visibility when using destination-exists skipping, an
 
 ## 2026-04-17 - Destination path preparation and drawer icon integration
 
-This update adds proactive destination drawer creation before archive extraction, and optional drawer icon application for newly created drawers.  This previously required a seperate program (available on Aminet) called IconSync to be run after WHDArchiveExtractor to create the icons.
+This update adds proactive destination drawer creation before archive extraction, and optional drawer icon application for newly created drawers.  This previously required a seperate program (available on Aminet) called IconSync to be run after WHDArchiveExtractor to create the icons.  This feature was requested by a user, but at the time, the quickest fix was to pull out the directory traversal code out of WHDAchiveExtractor and place it into a new program, rather the reprogram WHDAchiveExtractor to no longer depend on the extract tool to create the directories.
 
 ### What changed
 

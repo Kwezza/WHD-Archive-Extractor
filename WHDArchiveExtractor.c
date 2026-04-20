@@ -180,6 +180,7 @@ int num_drawer_icons_applied = 0;
 int num_drawer_icons_failed = 0;
 int num_archives_extracted = 0;
 int num_lzx_archives_skipped_test_unsupported = 0;
+int num_path_prep_fallbacks = 0;
 char destination_conflict_samples[MAX_CONFLICT_SAMPLES][MAX_PATH_LENGTH];
 int conflict_sample_count = 0;
 int conflict_sample_omitted_count = 0;
@@ -1157,9 +1158,11 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   char *directoryName;
   char program_name[16];
   char fileCommandStore[256];
+  char fallback_debug_line[MAX_LOG_LINE_LENGTH];
   LONG command_result;
   char *file_path_tmp;
   size_t needed;
+  int used_path_prep_fallback;
   struct FileInfoBlock *file_info_block;
 
   folder_claimed_destinations_count = 0;
@@ -1464,6 +1467,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 
                 /* Check for disk space before extracting */
                 should_stop_app = 0;
+                used_path_prep_fallback = 0;
                 if (skip_disk_space_check == false)
                 {
                   int disk_check_result = check_disk_space(output_directory_path, 20);
@@ -1489,28 +1493,40 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   if (!path_prepare_result)
                   {
                     printf(
-                        "\n\x1B[1mError:\x1B[0m "
+                        "\n\x1B[1mWarning:\x1B[0m "
                         "Unable to prepare destination drawers "
-                        "for %s at %s\n",
+                        "for %s at %s\n"
+                        "Falling back to extractor-managed folder creation.\n",
                         current_file_path,
                         destination_drawer_path);
 
-                    strncpy(single_error_message, current_file_path, MAX_ERROR_LENGTH - 1);
-                    single_error_message[MAX_ERROR_LENGTH - 1] = '\0';
-                    if (strlen(single_error_message) + strlen(" failed to prepare destination path") < MAX_ERROR_LENGTH)
-                    {
-                      strcat(single_error_message, " failed to prepare destination path");
-                    }
-                    log_error(single_error_message);
-                    continue;
-                  }
+                    used_path_prep_fallback = 1;
+                    num_path_prep_fallbacks++;
 
-                  num_directories_created += directories_created_for_archive;
+                    if (debug_mode)
+                    {
+                      fallback_debug_line[0] = '\0';
+                      strncat(fallback_debug_line, "fallback=path-prep-failed | archive=", MAX_LOG_LINE_LENGTH - strlen(fallback_debug_line) - 1);
+                      strncat(fallback_debug_line, current_file_path, MAX_LOG_LINE_LENGTH - strlen(fallback_debug_line) - 1);
+                      strncat(fallback_debug_line, " | destination=", MAX_LOG_LINE_LENGTH - strlen(fallback_debug_line) - 1);
+                      strncat(fallback_debug_line, destination_drawer_path, MAX_LOG_LINE_LENGTH - strlen(fallback_debug_line) - 1);
+                      append_log_line(debug_log_filename, fallback_debug_line);
+                    }
+                  }
+                  else
+                  {
+                    num_directories_created += directories_created_for_archive;
+                  }
                 }
 
                 if (should_stop_app == 0)
                 {
                   num_archives_found++;
+
+                  if (used_path_prep_fallback && debug_mode)
+                  {
+                    append_log_line(debug_log_filename, "fallback=extract-without-prepared-drawers");
+                  }
 
                   /* ---------------------------------------------------------- */
                   /* ARCHIVE-TYPE COMMAND EXECUTION                             */
@@ -1979,6 +1995,13 @@ int main(int argc, char *argv[])
     printf(
         "Created destination drawers during prep: \x1B[1m%d\x1B[0m\n",
         num_directories_created);
+  }
+
+  if (num_path_prep_fallbacks > 0)
+  {
+    printf(
+        "Destination drawer prep fallback used: \x1B[1m%d\x1B[0m\n",
+        num_path_prep_fallbacks);
   }
 
   if (enable_custom_icons)
