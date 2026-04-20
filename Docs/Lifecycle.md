@@ -1,150 +1,231 @@
-# WHDArchiveExtractor — Program Lifecycle
+# WHDArchiveExtractor Program Lifecycle
 
-## 1. Startup and Tool Checks
+This document reflects current behavior implemented in WHDArchiveExtractor.c.
 
-Before argument parsing, the program performs mandatory tool checks:
+## 1. Startup and Tool Detection
 
-- **`c:lha` (required):** Checked with `does_file_exist("c:lha")`. If missing, the program prints an error and exits immediately. No extraction is possible without it.
-- **`c:unlzx` (optional):** Also checked with `does_file_exist`. If missing, the program prints a warning and continues — LZX archives will be skipped. If present, the program runs `version c:unlzx` and inspects the output to set the correct extraction flags:
+On startup, the program does the following:
 
-  | Detected version | Extract command | Target flag |
-  |-----------------|----------------|-------------|
-  | `UnLZX 2.16`    | `-x`           | `-o`        |
-  | `LZX 1.21`      | `-q -x e`      | *(none)*    |
-  | Unknown / none  | ` e`           | *(none)*    |
+1. Parses early output-related options so startup verbosity can be adjusted.
+2. Prints the startup banner unless -output=script is active.
+3. Checks for required c:lha.
+4. Checks for optional c:unlzx.
 
----
+Tool behavior:
 
-## 2. Argument Parsing
+- c:lha missing: fatal. Program prints a message and exits.
+- c:unlzx missing: non-fatal. Program continues; LZX files are detected but cannot be expanded.
+- c:unlzx present: version is detected (version c:unlzx), then LZX command tokens are selected:
 
-Minimum required: `WHDArchiveExtractor <source_directory> <output_directory>`
+| Detected version | LZX command token | Target token |
+|---|---|---|
+| UnLZX 2.16 | -x | -o |
+| LZX 1.21 | -q -x e | (none) |
+| Unknown |  e | (none) |
 
-If fewer than 3 arguments are supplied the program prints usage text and exits with code `1`.
+In -testarchivesonly mode with UnLZX 2.16, LZX test commands are not attempted (unsupported by that tool version).
 
-```
-WHDArchiveExtractor <source_directory> <output_directory> [-enablespacecheck] [-testarchivesonly] [-skipifdestexists] [-quietskips] [-enablecustomicons]
-```
+## 2. CLI Parsing and Mode Resolution
 
-| Argument              | Effect |
-|-----------------------|--------|
-| `argv[1]`             | Source directory path (`input_directory_path`) |
-| `argv[2]`             | Destination directory path (`output_directory_path`) |
-| `-enablespacecheck`   | Enables the 20 MB free-space check before each extraction. Disabled by default. |
-| `-testarchivesonly`   | Passes a test/verify flag to the extractor instead of extracting files. |
-| `-skipifdestexists`   | Skips extraction when the destination drawer already exists (normal mode only). |
-| `-quietskips`         | Hides per-archive skip lines while keeping periodic progress heartbeat output. |
-| `-enablecustomicons`  | Applies custom drawer icons to newly created destination drawers. |
+Usage supports two launch forms:
 
-Option name note: use `-enablespacecheck`.
+- WHDArchiveExtractor <source_directory> <output_directory> [options]
+- WHDArchiveExtractor <source_directory> -testarchivesonly [options]
 
-After parsing, trailing slashes are stripped from both paths with `remove_trailing_slash()`.
+Supported options:
 
----
+- -enablespacecheck
+- -testarchivesonly
+- -skipifdestexists
+- -quietskips
+- -enablecustomicons
+- -debug
+- -output=script|normal|verbose
+- -writesummary
 
-## 3. Source and Target Existence Checks
+Important parsing behavior:
 
-Both directories are verified with `does_folder_exists()`, which attempts an Amiga `Lock()` on the path:
+1. The second argument can be treated as an option (not destination) when it begins with -.
+2. -testarchivesonly is detected early across arguments.
+3. If running source-only test mode, destination is internally set to source path, and target-folder existence checks are skipped.
+4. Trailing / is removed from source and destination paths.
 
-1. **Source directory** — if the lock fails the program prints `Unable to find the source folder <path>` and exits with code `0`.
-2. **Target directory** — same check; if the lock fails the program prints `Unable to find the target folder <path>` and exits with code `0`.
+Option effects:
 
-If `-enablespacecheck` was passed, a third check runs at this point: `check_disk_space()` queries the target volume via `Info()` and requires at least 20 MB free. If the check fails the program prints an error and exits before any scanning begins.
+- -enablespacecheck: enables 20MB free-space check (startup and per-archive in extraction mode).
+- -testarchivesonly: validates archives only, no extraction.
+- -skipifdestexists: in extraction mode, skips archive when resolved destination drawer already exists.
+- -quietskips: suppresses per-archive skip messages and prints heartbeat progress.
+- -enablecustomicons: applies drawer icons to newly created destination drawers.
+- -debug: writes timestamped debug log file (error-YYYYMMDD-HHMMSS.txt).
+- -output=script|normal|verbose:
+  - script: minimal console output and extractor output redirected to NIL:.
+  - normal: default output.
+  - verbose: normal output plus less-suppressed LHA extraction flags.
+- -writesummary: writes fixed summary file PROGDIR:WHDArchiveExtractor_last_run.txt.
 
----
+## 3. Preflight Validation and Run Logging Setup
 
-## 4. Recursive Directory Scan (`get_directory_contents`)
+Before scanning begins:
 
-With both directories confirmed, a timer starts (`time(NULL)`) and `get_directory_contents()` is called recursively.
+1. Source folder must exist.
+2. Destination folder must exist only when not in -testarchivesonly mode.
+3. If -enablespacecheck is active and not in test mode, free-space preflight must pass.
 
-For every entry found:
+Run-scoped log setup:
 
-- **Sub-directory:** `get_directory_contents()` is called again on that path (depth-first).
-- **File with `.LHA` or `.LZX` extension:** triggers the extraction flow below.
-- **Any other file:** silently skipped.
+- -debug: enables error-YYYYMMDD-HHMMSS.txt.
+- -skipifdestexists in extraction mode: enables New-YYYYMMDD-HHMMSS.txt.
+- -testarchivesonly: enables test_errors-YYYYMMDD-HHMMSS.txt.
 
----
+Startup prints active mode/log states unless -output=script is active.
 
-## 5. Per-Archive Extraction Flow
+## 4. Recursive Scan Engine
 
-### 5a. Protection-bit reset (LHA only, normal mode)
+The program recursively scans from source root.
 
-Before building the extraction command, the program runs:
+Per entry:
 
-```
-c:lha vq "<archive>" >ram:listing.txt
-```
+1. Build full path safely; on path overflow, log error and continue.
+2. If drawer: recurse.
+3. If file: process only .LHA or .LZX (case-insensitive via uppercase conversion).
 
-It reads `ram:listing.txt` to find the first directory name inside the archive. If that directory already exists in the target path, the program runs an Amiga `Protect` command to clear all protection bits recursively:
+A progress heartbeat is printed every QUIET_HEARTBEAT_INTERVAL entries when -quietskips is active and output mode is not script.
 
-```
-Protect <target_path>/<dir>/#? ALL rwed >NIL:
-```
+## 5. Destination Resolution, Conflict Checks, and Skip Rules
 
-This ensures existing protected files can be overwritten by the extraction. The temporary file `ram:listing.txt` is deleted afterwards.
+For each archive:
 
-### 5b. Disk space check (if `-enablespacecheck` is active)
+1. Resolve relative source subpath and base destination path.
+2. Build default destination drawer as <archive_name_without_extension>.
+3. For .LHA, inspect archive listing (c:lha vq ... >ram:listing.txt) and, if found, prefer first top-level drawer name as destination drawer.
 
-`check_disk_space()` is called on the target path before each archive. If less than 20 MB is free, `should_stop_app` is set to `1` and the loop exits, stopping all further extraction.
+Conflict checks:
 
-### 5c. Command execution
+- If destination exists but is not a drawer: count conflict and skip archive.
+- If two archives in same scanned folder claim same destination key: count conflict and skip archive.
+- Conflict samples are tracked for summary (with overflow count once sample cap is reached).
 
-The extraction command is assembled from:
+Skip rule:
 
-- The extractor binary (`lha` or `c:unlzx`)
-- The extract flags (or test flags when `-testarchivesonly` is active)
-- The quoted source archive path
-- The quoted target path (output directory + relative sub-path derived from the source tree)
+- If -skipifdestexists and not test mode and destination drawer already exists, archive is skipped and counted.
+- Skip line visibility depends on -quietskips and output mode.
 
-The path is sanitised by `sanitize_amiga_path()` to handle Amiga volume-colon and double-slash edge cases, then executed with `SystemTagList()`.
+## 6. Archive Mode Commands
 
-### 5d. Destination-exists skip handling
+### LHA
 
-When `-skipifdestexists` is enabled (and not in test mode), archives whose destination drawer already exists are skipped.
+- Test mode: lha t.
+- Normal mode: lha -T -M -N -m x.
+- Verbose mode: lha -T x.
 
-- Skip count is recorded for the final summary.
-- If `-quietskips` is not enabled, each skip prints a per-archive line.
-- If `-quietskips` is enabled, skip lines are suppressed and periodic scan heartbeat lines are printed instead.
+### LZX
 
----
+Command token depends on detected c:unlzx version:
 
-## 6. Extraction Error Handling
+- UnLZX 2.16: extraction uses -x with target token -o.
+- LZX 1.21: extraction uses -q -x e.
+- Unknown version: extraction uses  e fallback.
 
-The return code from `SystemTagList()` is inspected after every archive:
+LZX in test mode:
 
-| Return code | Meaning logged |
-|-------------|----------------|
-| `0`         | Success — no action |
-| `10`        | Corrupt archive — logged as `"<path> is corrupt"` |
-| Any other   | General failure — logged as `"<path> failed to extract. Unknown error"` |
+- UnLZX 2.16: test is skipped and counted (num_lzx_archives_skipped_test_unsupported).
+- Other versions: test uses t.
 
-Errors are stored in `error_messages_array[MAX_ERRORS][MAX_ERROR_LENGTH]` via `log_error()`. Each entry is capped at 255 characters.
+## 7. Destination Prep, Icons, and Fallback
 
-**Hard stop:** if `error_count` reaches `MAX_ERRORS` (40), the program prints `Maximum number of errors reached. Aborting.`, sets `should_stop_app = 1`, and exits the scan loop immediately.
+In extraction mode only (not test mode):
 
-Buffer overflow situations (path too long to fit in a fixed 256-byte buffer) are also logged as errors and skip the affected archive rather than truncating the path.
+1. Optionally perform per-archive disk-space check when -enablespacecheck is active.
+2. Attempt proactive destination drawer creation from output root to resolved destination path.
+3. If path prep succeeds: count created drawers.
+4. If path prep fails: warn and continue with extractor-managed folder creation fallback.
 
----
+Custom icon handling (-enablecustomicons):
 
-## 7. End-of-Run Summary
+- Applied only when a new drawer is created during prep.
+- Existing .info files are preserved.
+- Attempts matching icon from PROGDIR:Icons/<leaf_name>.info.
+- Falls back to default WBDRAWER icon if custom icon not found.
+- Icon failures are non-fatal and counted.
 
-After the scan loop completes, the program prints:
+Fallback usage is counted and optionally logged in debug log.
 
-1. **Directory and archive counts:**
-   ```
-   Scanned N directories and found N archives.
-   Archives composed of N LHA and N LZX archives.
-   Archives extracted: N
-   ```
-2. **Skip/conflict and runtime mode notes** (printed when applicable):
-   - `Skipped because destination existed: N`
-   - Destination conflict counters
-   - Quiet mode summary note when `-quietskips` is active
-3. **UnLZX warning** (if LZX archives were found but `c:unlzx` is not installed):
-   ```
-   UnLZX is not installed. N LZX archives were found but not expanded.
-   ```
-4. **Elapsed time** in `H:MM:SS` format.
-5. **Error list** (via `print_errors()`):
-   - If errors were logged, each is printed as `Error N: <message>`.
-   - If no errors occurred, prints `No errors encountered.`
-6. **Version banner** — the program name and version string are printed again as a closing line.
+## 8. LHA Protection Reset (Overwrite Prep)
+
+For LHA extraction mode, the program performs a pre-extraction overwrite prep:
+
+1. Reads archive listing to resolve top-level destination drawer.
+2. If that destination drawer already exists, executes:
+
+   protect "<target>/#?" all rwed >NIL:
+
+This attempts to clear restrictive protection bits before extraction overwrite.
+
+## 9. Command Execution and Error Handling
+
+Extraction/test command is assembled with source archive and resolved destination path, sanitized, and executed via SystemTagList().
+
+-output=script behavior:
+
+- Extractor command output is redirected to NIL:.
+- In extraction mode, one progress line is printed per archive: Extracting: <archive>.
+- Warnings/errors still appear.
+
+Return-code handling:
+
+- 0: success.
+- 10: logged as corrupt archive.
+- Other non-zero: logged as generic extraction failure.
+
+Additional logging:
+
+- In -testarchivesonly, non-zero returns append to test_errors-...txt.
+- In extraction mode with -skipifdestexists, successful new extractions append to New-...txt.
+- In debug mode, selected failures/fallback events append context lines.
+
+Hard stop:
+
+- When error count reaches MAX_ERRORS (40), scan aborts.
+
+## 10. End-of-Run Summary and Optional Fixed Summary File
+
+After scan completion:
+
+1. Elapsed time is computed.
+2. If -writesummary, a fixed summary file is written to:
+   - PROGDIR:WHDArchiveExtractor_last_run.txt
+3. Console summary is printed.
+
+Console summary includes:
+
+- Entries/archives totals and LHA/LZX split.
+- Extracted, skipped, conflicts.
+- Conflict subtype and sample count details when present.
+- Destination drawers created.
+- Destination prep fallback usage count.
+- Icon attempt/apply/failure counts when icon mode active.
+- LZX-unavailable note when LZX found and c:unlzx missing.
+- Test-mode LZX-skip count for UnLZX 2.16.
+- Quiet-skip note when enabled.
+- New archive log count/path when enabled.
+- Test error log count/path when applicable.
+- Runtime H:MM:SS and error count.
+- Detailed error list when errors exist.
+
+Clean test footer:
+
+- In -testarchivesonly, when no errors and no test failures were logged, prints:
+  - Archive test result: no damaged archives found.
+
+Final line:
+
+- Prints closing version banner.
+
+## 11. Current Behavioral Notes
+
+- Destination conflict detection is folder-local and sample-capped.
+- Source-only test mode is fully supported without destination argument.
+- New-...txt is run-scoped and records successful extractions only.
+- test_errors-...txt is run-scoped and test-mode only.
+- WHDArchiveExtractor_last_run.txt is overwritten each run when enabled.

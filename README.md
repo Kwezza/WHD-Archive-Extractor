@@ -17,10 +17,13 @@
                 <li>LZX: required for a small number of archives, and this can be downloaded from <a href="https://aminet.net/package/util/arc/lzx121r1">aminet.net/package/util/arc/lzx121r1</a>.</li>
             </ul>
             <h2>Usage</h2>
-        <pre><code>$ WHDArchiveExtractor &lt;source_directory&gt; &lt;output_directory&gt;</code></pre>
+        <pre><code>$ WHDArchiveExtractor &lt;source_directory&gt; &lt;output_directory&gt; [-enablespacecheck] [-testarchivesonly] [-skipifdestexists] [-quietskips] [-enablecustomicons] [-debug] [-output=script|normal|verbose] [-writesummary]</code></pre>
+        <pre><code>$ WHDArchiveExtractor &lt;source_directory&gt; -testarchivesonly [-enablespacecheck] [-skipifdestexists] [-quietskips] [-enablecustomicons] [-debug] [-output=script|normal|verbose] [-writesummary]</code></pre>
         <p>For example:</p>
-        <pre><code>$ WHDArchiveExtractor PC0:WHDLoad/Beta DH0:WHDLoad/Beta</code></pre>
+        <pre><code>$ WHDArchiveExtractor PC0:WHDLoad/Beta DH0:WHDLoad/Beta -skipifdestexists -quietskips -output=normal -writesummary</code></pre>
+        <pre><code>$ WHDArchiveExtractor PC0:WHDLoad/Beta -testarchivesonly -output=script -writesummary</code></pre>
         <p>This will scan the PC0:WHDLoad/Beta directory and extract all LHA archives found to the DH0:WHDLoad/Beta directory, preserving the folder structure.</p>
+        <p>In test-only mode, the extractor verifies archives without extracting and no output directory is required.</p>
             <h2>Building</h2>
         <p>To compile the program, use an Amiga C compiler, such as SAS/C, with the provided source code.</p>
             <h2>Disclaimer</h2>

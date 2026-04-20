@@ -1,5 +1,66 @@
 # Developer Log
 
+## 2026-04-20 - Normalized CLI options to single-dash lowercase
+
+This update aligns all runtime option names to Amiga/classic compact style.
+
+### What changed
+
+- Standardized non-positional options to single-dash lowercase forms.
+- Renamed `OUTPUT=...` to `-output=...`.
+- Renamed `WRITESUMMARY` to `-writesummary`.
+- Updated runtime usage text and parser checks to match.
+- Updated docs to use the normalized spellings.
+
+### Normalized forms
+
+- `-enablespacecheck`
+- `-testarchivesonly`
+- `-skipifdestexists`
+- `-quietskips`
+- `-enablecustomicons`
+- `-debug`
+- `-output=script|normal|verbose`
+- `-writesummary`
+
+## 2026-04-20 - Added explicit clean-result footer line for `-testarchivesonly`
+
+This update makes successful test-only runs clearer in the final summary block.
+
+### What changed
+
+- In `-testarchivesonly` mode, when no errors were recorded and no archive test failures were logged, the footer now prints:
+  - `Archive test result: no damaged archives found.`
+- The message is printed immediately before the final version banner.
+
+### Why
+
+- Users can now see an explicit pass statement at end-of-run without inferring status from counters alone.
+
+## 2026-04-20 - Fixed `-testarchivesonly` positional argument quirk (source-only test mode now accepted)
+
+This update removes the temporary need to provide a dummy destination path when running archive tests only.
+
+### What changed
+
+- `-testarchivesonly` is now detected via an early argument pre-scan.
+- When test-only mode is requested and no explicit destination is provided, the run no longer requires target-folder validation.
+- Destination-dependent preflight checks are now skipped in test-only mode:
+  - target folder existence validation
+  - optional disk space check (`-enablespacecheck`)
+
+### Supported launch forms
+
+- Source-only test mode (newly supported):
+  - `WHDArchiveExtractor <source> -testarchivesonly`
+- Legacy form remains valid:
+  - `WHDArchiveExtractor <source> RAM: -testarchivesonly`
+
+### Scope
+
+- This change is limited to argument handling and preflight gating for test-only runs.
+- Normal extraction mode still requires a valid destination folder.
+
 ## 2026-04-20 - Added OUTPUT modes (SCRIPT/NORMAL/VERBOSE) and fixed-name WRITESUMMARY report
 
 This update adds script-friendly output control and a fixed per-run summary report file for post-run inspection.

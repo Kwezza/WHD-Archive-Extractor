@@ -110,8 +110,8 @@ int  current_output_level = OUTPUT_NORMAL;
 bool write_summary_enabled = false;
 
 #define PROGRAM_NAME "WHD Archive Extractor"
-#define VERSION_STRING "1.3beta"
-#define VERSION_DATE "17.04.2026"
+#define VERSION_STRING "2.0"
+#define VERSION_DATE "20.04.2026"
 
 char *input_file_path;
 char *output_file_path;
@@ -1046,23 +1046,30 @@ int parse_output_level_argument(const char *argument, int *parsed_level)
     return 0;
   }
 
-  if (!starts_with_ignore_case(argument, "OUTPUT="))
+  if (starts_with_ignore_case(argument, "OUTPUT="))
+  {
+    value = argument + 7;
+  }
+  else if (starts_with_ignore_case(argument, "-output="))
+  {
+    value = argument + 8;
+  }
+  else
   {
     return 0;
   }
 
-  value = argument + 7;
-  if (equals_ignore_case(value, "SCRIPT"))
+  if (equals_ignore_case(value, "script"))
   {
     *parsed_level = OUTPUT_MINIMAL;
     return 1;
   }
-  if (equals_ignore_case(value, "NORMAL"))
+  if (equals_ignore_case(value, "normal"))
   {
     *parsed_level = OUTPUT_NORMAL;
     return 1;
   }
-  if (equals_ignore_case(value, "VERBOSE"))
+  if (equals_ignore_case(value, "verbose"))
   {
     *parsed_level = OUTPUT_VERBOSE;
     return 1;
@@ -1928,10 +1935,31 @@ int main(int argc, char *argv[])
 {
   int i, disk_check_result;
   int output_parse_result;
+  int test_mode_requested_early;
+  int has_explicit_output_directory;
+  int second_arg_looks_like_option;
+  int pre_option_start_index;
+  int option_start_index;
   long elapsed_seconds, hours, minutes, seconds;
   char *versionInfo;
 
-  for (i = 3; i < argc; i++)
+  second_arg_looks_like_option = 0;
+  pre_option_start_index = 3;
+
+  if (argc >= 3)
+  {
+    if (argv[2][0] == '-' ||
+        starts_with_ignore_case(argv[2], "OUTPUT=") ||
+        starts_with_ignore_case(argv[2], "-output=") ||
+        equals_ignore_case(argv[2], "WRITESUMMARY") ||
+        strcmp(argv[2], "-writesummary") == 0)
+    {
+      second_arg_looks_like_option = 1;
+      pre_option_start_index = 2;
+    }
+  }
+
+  for (i = pre_option_start_index; i < argc; i++)
   {
     output_parse_result = parse_output_level_argument(argv[i], &current_output_level);
     if (output_parse_result == 1)
@@ -1939,7 +1967,7 @@ int main(int argc, char *argv[])
       continue;
     }
 
-    if (equals_ignore_case(argv[i], "WRITESUMMARY"))
+    if (equals_ignore_case(argv[i], "WRITESUMMARY") || strcmp(argv[i], "-writesummary") == 0)
     {
       write_summary_enabled = true;
     }
@@ -1954,36 +1982,39 @@ int main(int argc, char *argv[])
   /* Blue text:   printf("\x1B[32m 32:\x1B[0m \n"); */
   /* Grey text:   printf("\x1B[33m 33:\x1B[0m \n"); */
 
-  if (current_output_level != OUTPUT_MINIMAL)
-  {
     printf("\n");
     printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", VERSION_STRING);
 
-    printf(
-        "\x1B[32mThis program is designed to automatically locate "
-        "LHA and LZX archive files\nwithin nested subdirectories, "
-        "extract their contents to a specified\ndestination, and preserve the original directory "
-        "hierarchy in which the \narchives were located.\x1B[0m \n\n");
-  }
-
-  if (!does_file_exist("c:lha"))
+  if (current_output_level != OUTPUT_MINIMAL)
   {
-    printf(
-        "File c:lha does not exist. As this program requires it to "
-        "extract the archives, it will now quit. Please install the "
-        "latest version of lha.run from www.aminet.org\n");
-    return 0;
-  }
 
 
-  if (!does_file_exist("c:unlzx"))
-  {
     printf(
-        "File c:unlzx does not exist. There are a few LZX compressed "
-        "archives for WHDLoad.  This program will continue and ignore these "
-        "archives until UnLZX is installed.  Please install the latest version "
-        "of lzx121r1.lha from www.aminet.org\n");
+        "\x1B[32mThis program is designed to automatically locate LHA and LZX archive files\n"
+        "within nested subdirectories, extract their contents to a specified\n"
+        "destination, and preserve the original directory hierarchy in which the\n"
+        "archives were found. It also supports archive test-only mode, skipping\n"
+        "existing destinations, and script-friendly batch processing.\x1B[0m \n\n");
   }
+
+if (!does_file_exist("c:lha"))
+{
+  printf(
+      "Required file c:lha was not found. This program depends on LHA "
+      "to test and extract supported archives, so it cannot continue. "
+      "Please install the latest version of lha.run from www.aminet.org\n");
+  return 0;
+}
+
+if (!does_file_exist("c:unlzx"))
+{
+  printf(
+      "Optional file c:unlzx was not found. A small number of WHDLoad "
+      "archives use LZX compression, so those archives will be skipped "
+      "until UnLZX is installed. All other supported archives will still "
+      "be processed normally. Please install the latest version of "
+      "lzx121r1.lha from www.aminet.org\n");
+}
   else
   {
     versionInfo = get_executable_version("c:unlzx");
@@ -2030,9 +2061,19 @@ int main(int argc, char *argv[])
   if (argc < 3)
   {
     printf(
-        "\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
-        "<output_directory_path> [-enablespacecheck (experimental)] "
-      "[-testarchivesonly] [-skipifdestexists] [-quietskips] [-enablecustomicons] [-debug] [OUTPUT=SCRIPT|NORMAL|VERBOSE] [WRITESUMMARY] \n\n");
+      "Usage:\n"
+      "  WHDArchiveExtractor <source_directory> <output_directory_path> [options]\n"
+      "  WHDArchiveExtractor <source_directory> -testarchivesonly [options]\n"
+      "\n"
+      "Options:\n"
+      "  -enablespacecheck             Check free space (20MB min) before each extract.\n"
+      "  -testarchivesonly             Test archives only; do not extract.\n"
+      "  -skipifdestexists             Skip archive if target drawer exists.\n"
+      "  -quietskips                   Hide skip lines; keep heartbeat.\n"
+      "  -enablecustomicons            Apply custom icons to new drawers.\n"
+      "  -debug                        Write timestamped debug log.\n"
+      "  OUTPUT=SCRIPT|NORMAL|VERBOSE Set output level (also supports -output=...).\n"
+      "  WRITESUMMARY                  Save run summary file (also supports -writesummary).\n\n");
     return 1;
   }
 
@@ -2041,10 +2082,37 @@ int main(int argc, char *argv[])
   /* ------------------------------------------------------------------------ */
 
   input_directory_path = argv[1];
-  output_directory_path = argv[2];
+
+  test_mode_requested_early = 0;
+  for (i = 2; i < argc; i++)
+  {
+    if (strcmp(argv[i], "-testarchivesonly") == 0)
+    {
+      test_mode_requested_early = 1;
+      break;
+    }
+  }
+
+  has_explicit_output_directory = (argc >= 3 && !second_arg_looks_like_option);
+
+  if (has_explicit_output_directory)
+  {
+    output_directory_path = argv[2];
+  }
+  else if (test_mode_requested_early)
+  {
+    /* test-only source-only mode: destination path is not required */
+    output_directory_path = argv[1];
+  }
+  else
+  {
+    output_directory_path = argv[2];
+  }
+
+  option_start_index = has_explicit_output_directory ? 3 : 2;
 
   skip_disk_space_check = true;
-  for (i = 3; i < argc; i++)
+  for (i = option_start_index; i < argc; i++)
   {
     if (strcmp(argv[i], "-enablespacecheck") == 0)
     {
@@ -2077,7 +2145,7 @@ int main(int argc, char *argv[])
       printf("Warning: invalid OUTPUT value '%s'. Valid values are SCRIPT, NORMAL, VERBOSE.\n", argv[i]);
     }
 
-    if (equals_ignore_case(argv[i], "WRITESUMMARY"))
+    if (equals_ignore_case(argv[i], "WRITESUMMARY") || strcmp(argv[i], "-writesummary") == 0)
     {
       write_summary_enabled = true;
     }
@@ -2190,13 +2258,13 @@ int main(int argc, char *argv[])
     printf("\nUnable to find the source folder %s\n\n", input_directory_path);
     return 0;
   }
-  if (does_folder_exists(output_directory_path) == 0)
+  if (!test_archives_only && does_folder_exists(output_directory_path) == 0)
   {
     printf("\nUnable to find the target folder %s\n\n", output_directory_path);
     return 0;
   }
 
-  if (!skip_disk_space_check)
+  if (!skip_disk_space_check && !test_archives_only)
   {
     disk_check_result = check_disk_space(output_directory_path, 20);
     if (disk_check_result < 0)
@@ -2339,6 +2407,12 @@ int main(int argc, char *argv[])
   {
     print_errors();
   }
+
+  if (test_archives_only && error_count == 0 && test_errors_log_count == 0)
+  {
+    printf("Archive test result: no damaged archives found.\n");
+  }
+
   printf("\nWHDArchiveExtractor V%s\n\n", VERSION_STRING);
   return 0;
 }
