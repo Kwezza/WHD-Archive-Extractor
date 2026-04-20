@@ -1,0 +1,14 @@
+source_path: Work:whdfetch/GameFiles
+destination_path: Work:whdfetch/TestExtract
+output_mode: NORMAL
+archives_found_total: 89
+archives_found_lha: 89
+archives_found_lzx: 0
+archives_extracted: 89
+archives_skipped: 0
+archives_failed: 0
+fallback_used: 0
+start_time_epoch: 1776467015
+end_time_epoch: 1776467020
+elapsed_seconds: 5
+result: OK

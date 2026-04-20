@@ -1,0 +1,6 @@
+debug logging enabled
+summary=enabled-via-args
+summary=attempt | path=PROGDIR:WHDArchiveExtractor_last_run.txt | elapsed=6
+summary=open-ok | path=PROGDIR:WHDArchiveExtractor_last_run.txt
+summary=write-success
+summary=final-status | ok

@@ -1,5 +1,80 @@
 # Developer Log
 
+## 2026-04-20 - Added OUTPUT modes (SCRIPT/NORMAL/VERBOSE) and fixed-name WRITESUMMARY report
+
+This update adds script-friendly output control and a fixed per-run summary report file for post-run inspection.
+
+### New OUTPUT argument
+
+- New argument: `OUTPUT=SCRIPT|NORMAL|VERBOSE` (case-insensitive)
+- Mapping:
+  - `SCRIPT` -> minimal console output
+  - `NORMAL` -> existing default-style output
+  - `VERBOSE` -> normal output plus verbose LHA extraction command behavior
+
+### OUTPUT mode behavior
+
+- `SCRIPT` mode:
+  - suppresses most non-critical console chatter
+  - keeps warnings/errors visible
+  - prints a single per-archive progress line when extraction starts: `Extracting: <archive>`
+  - redirects extractor command output to `NIL:` to avoid tool chatter in script runs
+- `NORMAL` mode:
+  - preserves prior console behavior (default when `OUTPUT=` is not provided)
+- `VERBOSE` mode:
+  - for LHA extraction (non-test), uses `lha -T x` instead of `lha -T -M -N -m x`
+  - LZX/UnLZX behavior remains unchanged
+
+### New WRITESUMMARY argument
+
+- New switch: `WRITESUMMARY` (case-insensitive)
+- Writes a fixed-name text report to:
+  - `PROGDIR:WHDArchiveExtractor_last_run.txt`
+- File is overwritten each run (not timestamped), to support script consumption of latest run status.
+
+### Summary report contents
+
+- `source_path`
+- `destination_path`
+- `output_mode`
+- `archives_found_total`
+- `archives_found_lha`
+- `archives_found_lzx`
+- `archives_extracted`
+- `archives_skipped`
+- `archives_failed`
+- `fallback_used`
+- `start_time_epoch`
+- `end_time_epoch`
+- `elapsed_seconds`
+- `result`
+- `destination_conflicts` (only when non-zero)
+
+### Implementation note
+
+- Summary writing uses Amiga DOS `Open/Write/Close` for `PROGDIR:` compatibility in this codebase.
+
+## 2026-04-20 - Clarified New-[timestamp].txt semantics for -skipifdestexists runs
+
+This note clarifies how to interpret the `New-[timestamp].txt` file for user documentation.
+
+### Behavior interpretation
+
+- In normal extraction mode, `-skipifdestexists` creates `New-YYYYMMDD-HHMMSS.txt`.
+- Each line represents one archive that was actually extracted successfully during that run.
+- This makes the file a practical per-run view of newly extracted archives among already existing extracted content.
+
+### Logged line format
+
+- `archive=<archive-file> | destination=<resolved-destination-drawer-path>`
+
+### Important limits for manual wording
+
+- The log is run-scoped, not a persistent history across runs.
+- The log records successful extractions only.
+- The log is not active in `-testarchivesonly` mode.
+- The skip decision is destination-exists based, not a content-diff validation.
+
 ## 2026-04-20 - Added automatic fallback to extractor-managed folder creation when destination prep fails
 
 This update hardens archive extraction against failures in the proactive destination drawer creation step.

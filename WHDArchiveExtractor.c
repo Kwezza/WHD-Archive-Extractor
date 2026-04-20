@@ -65,6 +65,7 @@
 #include <proto/exec.h>
 #include <proto/icon.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -91,6 +92,10 @@
 #define ICON_APPLIER_DEFAULT_ICONS_DIR "PROGDIR:Icons"
 #define MAX_LOG_FILENAME_LENGTH 128
 #define MAX_LOG_LINE_LENGTH 768
+#define OUTPUT_MINIMAL 0
+#define OUTPUT_NORMAL 1
+#define OUTPUT_VERBOSE 2
+#define LAST_RUN_SUMMARY_FILENAME "PROGDIR:WHDArchiveExtractor_last_run.txt"
 
 typedef struct icon_applier_options
 {
@@ -101,6 +106,8 @@ typedef struct icon_applier_options
 bool skip_disk_space_check = false, test_archives_only = false, skip_if_dest_exists = false, enable_custom_icons = false, quiet_skips = false, debug_mode = false;
 bool unlzx_is_216 = false;
 bool lzx_test_skip_notice_printed = false;
+int  current_output_level = OUTPUT_NORMAL;
+bool write_summary_enabled = false;
 
 #define PROGRAM_NAME "WHD Archive Extractor"
 #define VERSION_STRING "1.3beta"
@@ -152,6 +159,12 @@ void  print_errors(void);
 void  remove_trailing_slash(char *str);
 char *find_first_directory(char *filePath);
 char *get_file_extension(const char *filename, char *outputBuffer);
+int   equals_ignore_case(const char *left, const char *right);
+int   starts_with_ignore_case(const char *text, const char *prefix);
+int   parse_output_level_argument(const char *argument, int *parsed_level);
+const char *output_mode_to_text(int output_level);
+int   write_summary_line(BPTR summary_file, const char *format, ...);
+int   write_last_run_summary(long elapsed_seconds);
 int   get_path_state(const char *path);
 int   is_destination_claimed(const char *destination_path, char *claimed_destinations[], int claimed_destinations_count);
 int   add_claimed_destination(const char *destination_path, char *claimed_destinations[], int *claimed_destinations_count);
@@ -966,9 +979,114 @@ BOOL icon_applier_ensure_drawer_icon(const char *dir_path, const icon_applier_op
 /* SECTION: TEST-MODE LOGIC                                                   */
 /* ========================================================================== */
 
+int equals_ignore_case(const char *left, const char *right)
+{
+  unsigned char left_char;
+  unsigned char right_char;
+
+  if (left == NULL || right == NULL)
+  {
+    return 0;
+  }
+
+  while (*left != '\0' && *right != '\0')
+  {
+    left_char = (unsigned char)*left;
+    right_char = (unsigned char)*right;
+
+    if (toupper(left_char) != toupper(right_char))
+    {
+      return 0;
+    }
+
+    left++;
+    right++;
+  }
+
+  return (*left == '\0' && *right == '\0');
+}
+
+int starts_with_ignore_case(const char *text, const char *prefix)
+{
+  unsigned char text_char;
+  unsigned char prefix_char;
+
+  if (text == NULL || prefix == NULL)
+  {
+    return 0;
+  }
+
+  while (*prefix != '\0')
+  {
+    if (*text == '\0')
+    {
+      return 0;
+    }
+
+    text_char = (unsigned char)*text;
+    prefix_char = (unsigned char)*prefix;
+    if (toupper(text_char) != toupper(prefix_char))
+    {
+      return 0;
+    }
+
+    text++;
+    prefix++;
+  }
+
+  return 1;
+}
+
+int parse_output_level_argument(const char *argument, int *parsed_level)
+{
+  const char *value;
+
+  if (argument == NULL || parsed_level == NULL)
+  {
+    return 0;
+  }
+
+  if (!starts_with_ignore_case(argument, "OUTPUT="))
+  {
+    return 0;
+  }
+
+  value = argument + 7;
+  if (equals_ignore_case(value, "SCRIPT"))
+  {
+    *parsed_level = OUTPUT_MINIMAL;
+    return 1;
+  }
+  if (equals_ignore_case(value, "NORMAL"))
+  {
+    *parsed_level = OUTPUT_NORMAL;
+    return 1;
+  }
+  if (equals_ignore_case(value, "VERBOSE"))
+  {
+    *parsed_level = OUTPUT_VERBOSE;
+    return 1;
+  }
+
+  return -1;
+}
+
+const char *output_mode_to_text(int output_level)
+{
+  if (output_level == OUTPUT_MINIMAL)
+  {
+    return "SCRIPT";
+  }
+  if (output_level == OUTPUT_VERBOSE)
+  {
+    return "VERBOSE";
+  }
+  return "NORMAL";
+}
+
 void maybe_print_quiet_heartbeat(void)
 {
-  if (quiet_skips && (num_directories_scanned % QUIET_HEARTBEAT_INTERVAL) == 0)
+  if (current_output_level != OUTPUT_MINIMAL && quiet_skips && (num_directories_scanned % QUIET_HEARTBEAT_INTERVAL) == 0)
   {
     printf("[quiet] Scan heartbeat: scanned \x1B[1m%d\x1B[0m entries, archives found \x1B[1m%d\x1B[0m\n",
            num_directories_scanned,
@@ -1130,6 +1248,82 @@ int build_timestamped_log_filename(const char *prefix, char *output_buffer, size
   return 1;
 }
 
+int write_last_run_summary(long elapsed_seconds)
+{
+  BPTR summary_file;
+  time_t end_time;
+  long archives_skipped;
+
+  summary_file = Open((CONST_STRPTR)LAST_RUN_SUMMARY_FILENAME, MODE_NEWFILE);
+  if (summary_file == 0)
+  {
+    return 0;
+  }
+
+  end_time = time(NULL);
+  archives_skipped = (long)num_archives_skipped_dest_exists + (long)num_lzx_archives_skipped_test_unsupported;
+
+  if (!write_summary_line(summary_file, "source_path: %s\n", input_directory_path) ||
+      !write_summary_line(summary_file, "destination_path: %s\n", output_directory_path) ||
+      !write_summary_line(summary_file, "output_mode: %s\n", output_mode_to_text(current_output_level)) ||
+      !write_summary_line(summary_file, "archives_found_total: %d\n", num_lha_archives_found + num_lzx_archives_found) ||
+      !write_summary_line(summary_file, "archives_found_lha: %d\n", num_lha_archives_found) ||
+      !write_summary_line(summary_file, "archives_found_lzx: %d\n", num_lzx_archives_found) ||
+      !write_summary_line(summary_file, "archives_extracted: %d\n", num_archives_extracted) ||
+      !write_summary_line(summary_file, "archives_skipped: %ld\n", archives_skipped) ||
+      !write_summary_line(summary_file, "archives_failed: %d\n", error_count) ||
+      !write_summary_line(summary_file, "fallback_used: %d\n", num_path_prep_fallbacks) ||
+      !write_summary_line(summary_file, "start_time_epoch: %ld\n", start_time) ||
+      !write_summary_line(summary_file, "end_time_epoch: %ld\n", (long)end_time) ||
+      !write_summary_line(summary_file, "elapsed_seconds: %ld\n", elapsed_seconds) ||
+      !write_summary_line(summary_file, "result: %s\n", error_count > 0 ? "COMPLETED_WITH_ERRORS" : "OK"))
+  {
+    Close(summary_file);
+    return 0;
+  }
+
+  if (num_destination_conflicts > 0)
+  {
+    if (!write_summary_line(summary_file, "destination_conflicts: %d\n", num_destination_conflicts))
+    {
+      Close(summary_file);
+      return 0;
+    }
+  }
+
+  Close(summary_file);
+
+  return 1;
+}
+
+int write_summary_line(BPTR summary_file, const char *format, ...)
+{
+  char line_buffer[MAX_LOG_LINE_LENGTH];
+  int line_length;
+  va_list args;
+
+  if (summary_file == 0 || format == NULL)
+  {
+    return 0;
+  }
+
+  va_start(args, format);
+  line_length = vsprintf(line_buffer, format, args);
+  va_end(args);
+
+  if (line_length < 0)
+  {
+    return 0;
+  }
+
+  if (Write(summary_file, line_buffer, line_length) != line_length)
+  {
+    return 0;
+  }
+
+  return 1;
+}
+
 /* ========================================================================== */
 /* SECTION: MAIN SCAN/EXTRACT FLOW                                            */
 /* ========================================================================== */
@@ -1162,13 +1356,17 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
   LONG command_result;
   char *file_path_tmp;
   size_t needed;
+  size_t redirect_suffix_length;
   int used_path_prep_fallback;
   struct FileInfoBlock *file_info_block;
 
   folder_claimed_destinations_count = 0;
   reset_protection_bits = 1;
 
-  printf("Scanning directory: %s\n", input_directory_path);
+  if (current_output_level != OUTPUT_MINIMAL)
+  {
+    printf("Scanning directory: %s\n", input_directory_path);
+  }
 
   dir_lock = Lock((CONST_STRPTR)input_directory_path, ACCESS_READ);
   if (dir_lock)
@@ -1335,7 +1533,7 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                 if (skip_if_dest_exists && !test_archives_only && destination_path_state == 1)
                 {
                   relative_destination_path = remove_text(destination_drawer_path, output_directory_path);
-                  if (!quiet_skips)
+                  if (!quiet_skips && current_output_level != OUTPUT_MINIMAL)
                   {
                     printf("Skipping \x1B[1m%s\x1B[0m (already exists: \x1B[1m%s\x1B[0m)\n", file_info_block->fib_FileName, relative_destination_path);
                   }
@@ -1344,13 +1542,19 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   continue;
                 }
 
-                if (test_archives_only && !(strcmp(file_extension, ".LZX") == 0 && unlzx_is_216))
+                if (current_output_level != OUTPUT_MINIMAL)
                 {
-                  printf("Testing \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName);
-                }
-                else
-                {
-                  printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
+                  if (test_archives_only)
+                  {
+                    if (!(strcmp(file_extension, ".LZX") == 0 && unlzx_is_216))
+                    {
+                      printf("Testing \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName);
+                    }
+                  }
+                  else
+                  {
+                    printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
+                  }
                 }
                 FreeVec(file_path_tmp);
                 if (strcmp(file_extension, ".LHA") == 0)
@@ -1364,7 +1568,14 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   }
                   else
                   {
-                    strcpy(ExtractCommand, "-T -M -N -m x\0");
+                    if (current_output_level == OUTPUT_VERBOSE)
+                    {
+                      strcpy(ExtractCommand, "-T x\0");
+                    }
+                    else
+                    {
+                      strcpy(ExtractCommand, "-T -M -N -m x\0");
+                    }
 
                     if (reset_protection_bits == 1)
                     {
@@ -1420,7 +1631,10 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                           }
                           sanitize_amiga_path(fileCommandStore);
 
-                          printf("Prepping any protected files for potential replacement...\n");
+                          if (current_output_level != OUTPUT_MINIMAL)
+                          {
+                            printf("Prepping any protected files for potential replacement...\n");
+                          }
                           SystemTagList(fileCommandStore, NULL);
 
                           FreeVec(file_path_tmp);
@@ -1434,7 +1648,14 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                       }
                     }
                     ExtractCommand[0] = '\0';
-                    strcpy(ExtractCommand, "-T -M -N -m x\0");
+                    if (current_output_level == OUTPUT_VERBOSE)
+                    {
+                      strcpy(ExtractCommand, "-T x\0");
+                    }
+                    else
+                    {
+                      strcpy(ExtractCommand, "-T -M -N -m x\0");
+                    }
                   }
                 }
                 else
@@ -1535,8 +1756,9 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   /* Combine the extraction command, source
                    * path, and output path */
                   file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
+                    redirect_suffix_length = (current_output_level == OUTPUT_MINIMAL) ? strlen(" >NIL:") : 0;
                   if (file_path_tmp) {
-                      needed = strlen(program_name) + 1 + strlen(ExtractCommand) + 3 + strlen(current_file_path) + 3 + strlen(ExtractTargetCommand) + 3 + strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 2 + 1;
+                      needed = strlen(program_name) + 1 + strlen(ExtractCommand) + 3 + strlen(current_file_path) + 3 + strlen(ExtractTargetCommand) + 3 + strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 2 + redirect_suffix_length + 1;
                       if (needed <= sizeof(extraction_command)) {
                           strcpy(extraction_command, program_name);
                           strcat(extraction_command, " ");
@@ -1550,6 +1772,10 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                           strcat(extraction_command, "/");
                           strcat(extraction_command, file_path_tmp);
                           strcat(extraction_command, "\"");
+                          if (current_output_level == OUTPUT_MINIMAL)
+                          {
+                            strcat(extraction_command, " >NIL:");
+                          }
                       } else {
                           printf("Error: Path too long for extraction_command buffer.\n");
                           log_error("Error: Path too long for extraction_command buffer.");
@@ -1562,6 +1788,14 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
                   }
                   sanitize_amiga_path(extraction_command);
                   FreeVec(file_path_tmp);
+
+                  if (!test_archives_only)
+                  {
+                    if (current_output_level == OUTPUT_MINIMAL)
+                    {
+                      printf("Extracting: %s\n", file_info_block->fib_FileName);
+                    }
+                  }
 
 
 
@@ -1693,8 +1927,23 @@ void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory
 int main(int argc, char *argv[])
 {
   int i, disk_check_result;
+  int output_parse_result;
   long elapsed_seconds, hours, minutes, seconds;
   char *versionInfo;
+
+  for (i = 3; i < argc; i++)
+  {
+    output_parse_result = parse_output_level_argument(argv[i], &current_output_level);
+    if (output_parse_result == 1)
+    {
+      continue;
+    }
+
+    if (equals_ignore_case(argv[i], "WRITESUMMARY"))
+    {
+      write_summary_enabled = true;
+    }
+  }
 
   /* ------------------------------------------------------------------------ */
   /* MAIN LIFECYCLE: startup banner and tool availability checks              */
@@ -1705,14 +1954,17 @@ int main(int argc, char *argv[])
   /* Blue text:   printf("\x1B[32m 32:\x1B[0m \n"); */
   /* Grey text:   printf("\x1B[33m 33:\x1B[0m \n"); */
 
-  printf("\n");
-  printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", VERSION_STRING);
+  if (current_output_level != OUTPUT_MINIMAL)
+  {
+    printf("\n");
+    printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", VERSION_STRING);
 
-  printf(
-      "\x1B[32mThis program is designed to automatically locate "
-      "LHA and LZX archive files\nwithin nested subdirectories, "
-      "extract their contents to a specified\ndestination, and preserve the original directory "
-      "hierarchy in which the \narchives were located.\x1B[0m \n\n");
+    printf(
+        "\x1B[32mThis program is designed to automatically locate "
+        "LHA and LZX archive files\nwithin nested subdirectories, "
+        "extract their contents to a specified\ndestination, and preserve the original directory "
+        "hierarchy in which the \narchives were located.\x1B[0m \n\n");
+  }
 
   if (!does_file_exist("c:lha"))
   {
@@ -1748,14 +2000,20 @@ int main(int argc, char *argv[])
       strcpy(lzx_extract_command, "-x");
       strcpy(lzx_extract_target_command, "-o");
       unlzx_is_216 = true;
-      printf("UnLZX version recognised as UnLZX 2.16.\n");
+      if (current_output_level != OUTPUT_MINIMAL)
+      {
+        printf("UnLZX version recognised as UnLZX 2.16.\n");
+      }
     }
     else if (strcmp(versionInfo, "LZX 1.21") == 0)
     {
       strcpy(lzx_extract_command, "-q -x e");
       strcpy(lzx_extract_target_command, "  ");
       unlzx_is_216 = false;
-      printf("UnLZX version recognised as LZX 1.21 \n");
+      if (current_output_level != OUTPUT_MINIMAL)
+      {
+        printf("UnLZX version recognised as LZX 1.21 \n");
+      }
     }
     else
     {
@@ -1774,7 +2032,7 @@ int main(int argc, char *argv[])
     printf(
         "\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
         "<output_directory_path> [-enablespacecheck (experimental)] "
-        "[-testarchivesonly] [-skipifdestexists] [-quietskips] [-enablecustomicons] [-debug] \n\n");
+      "[-testarchivesonly] [-skipifdestexists] [-quietskips] [-enablecustomicons] [-debug] [OUTPUT=SCRIPT|NORMAL|VERBOSE] [WRITESUMMARY] \n\n");
     return 1;
   }
 
@@ -1811,6 +2069,17 @@ int main(int argc, char *argv[])
     if (strcmp(argv[i], "-debug") == 0)
     {
       debug_mode = true;
+    }
+
+    output_parse_result = parse_output_level_argument(argv[i], &current_output_level);
+    if (output_parse_result == -1)
+    {
+      printf("Warning: invalid OUTPUT value '%s'. Valid values are SCRIPT, NORMAL, VERBOSE.\n", argv[i]);
+    }
+
+    if (equals_ignore_case(argv[i], "WRITESUMMARY"))
+    {
+      write_summary_enabled = true;
     }
   }
 
@@ -1864,52 +2133,55 @@ int main(int argc, char *argv[])
 
   input_file_path = input_directory_path;
 
-  printf("\x1B[1mScanning directory:    \x1B[0m %s\n", input_directory_path);
-  printf("\x1B[1mExtracting archives to:\x1B[0m %s\n", output_directory_path);
-  if (enable_custom_icons)
+  if (current_output_level != OUTPUT_MINIMAL)
   {
-    printf("\x1B[1mCustom drawer icons:\x1B[0m enabled (source: %s)\n", drawer_icon_options.icons_dir);
-  }
-  else
-  {
-    printf("\x1B[1mCustom drawer icons:\x1B[0m disabled\n");
-  }
-  if (quiet_skips)
-  {
-    printf("\x1B[1mSkip logging:\x1B[0m quiet mode enabled (skip lines hidden, heartbeat every %d entries)\n", QUIET_HEARTBEAT_INTERVAL);
-  }
-  else
-  {
-    printf("\x1B[1mSkip logging:\x1B[0m normal\n");
-  }
-  if (debug_mode)
-  {
-    printf("\x1B[1mDebug logging:\x1B[0m enabled (%s)\n", debug_log_filename);
-  }
-  else
-  {
-    printf("\x1B[1mDebug logging:\x1B[0m disabled\n");
-  }
-  if (test_archives_only)
-  {
-    if (test_errors_log_enabled)
+    printf("\x1B[1mScanning directory:    \x1B[0m %s\n", input_directory_path);
+    printf("\x1B[1mExtracting archives to:\x1B[0m %s\n", output_directory_path);
+    if (enable_custom_icons)
     {
-      printf("\x1B[1mTest errors log:\x1B[0m enabled (%s)\n", test_errors_log_filename);
+      printf("\x1B[1mCustom drawer icons:\x1B[0m enabled (source: %s)\n", drawer_icon_options.icons_dir);
     }
     else
     {
-      printf("\x1B[1mTest errors log:\x1B[0m disabled\n");
+      printf("\x1B[1mCustom drawer icons:\x1B[0m disabled\n");
     }
-  }
-  if (skip_if_dest_exists)
-  {
-    if (new_extract_log_enabled)
+    if (quiet_skips)
     {
-      printf("\x1B[1mNew archive log:\x1B[0m enabled (%s)\n", new_extract_log_filename);
+      printf("\x1B[1mSkip logging:\x1B[0m quiet mode enabled (skip lines hidden, heartbeat every %d entries)\n", QUIET_HEARTBEAT_INTERVAL);
     }
-    else if (!test_archives_only)
+    else
     {
-      printf("\x1B[1mNew archive log:\x1B[0m disabled\n");
+      printf("\x1B[1mSkip logging:\x1B[0m normal\n");
+    }
+    if (debug_mode)
+    {
+      printf("\x1B[1mDebug logging:\x1B[0m enabled (%s)\n", debug_log_filename);
+    }
+    else
+    {
+      printf("\x1B[1mDebug logging:\x1B[0m disabled\n");
+    }
+    if (test_archives_only)
+    {
+      if (test_errors_log_enabled)
+      {
+        printf("\x1B[1mTest errors log:\x1B[0m enabled (%s)\n", test_errors_log_filename);
+      }
+      else
+      {
+        printf("\x1B[1mTest errors log:\x1B[0m disabled\n");
+      }
+    }
+    if (skip_if_dest_exists)
+    {
+      if (new_extract_log_enabled)
+      {
+        printf("\x1B[1mNew archive log:\x1B[0m enabled (%s)\n", new_extract_log_filename);
+      }
+      else if (!test_archives_only)
+      {
+        printf("\x1B[1mNew archive log:\x1B[0m disabled\n");
+      }
     }
   }
 
@@ -1953,6 +2225,11 @@ int main(int argc, char *argv[])
   hours = elapsed_seconds / 3600;
   minutes = (elapsed_seconds % 3600) / 60;
   seconds = elapsed_seconds % 60;
+
+  if (write_summary_enabled && !write_last_run_summary(elapsed_seconds))
+  {
+    printf("Warning: unable to write summary file %s\n", LAST_RUN_SUMMARY_FILENAME);
+  }
 
   /* ------------------------------------------------------------------------ */
   /* MAIN LIFECYCLE: logging and summary output                               */
