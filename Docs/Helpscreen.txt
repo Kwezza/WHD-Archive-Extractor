@@ -1,0 +1,13 @@
+Usage:
+  WHDArchiveExtractor <source_directory> <output_directory_path> [options]
+  WHDArchiveExtractor <source_directory> -testarchivesonly [options]
+
+Options:
+  -enablespacecheck             Check free space (20MB min) before each extract.
+  -testarchivesonly             Test archives only; do not extract.
+  -skipifdestexists             Skip archive if target drawer exists.
+  -quietskips                   Hide skip lines; keep heartbeat.
+  -enablecustomicons            Apply custom icons to new drawers.
+  -debug                        Write timestamped debug log.
+  -output=script|normal|verbose Set output level.
+  -writesummary                 Save run summary file.

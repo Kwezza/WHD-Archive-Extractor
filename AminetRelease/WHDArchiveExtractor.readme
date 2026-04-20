@@ -1,0 +1,143 @@
+Short:        Automates extraction of WHDLoad archives
+Author:       Kerry Thompson
+Uploader:     kwezza@gmail.com
+Type:         util/arc
+Version:      2.0
+Requires:     util/arc/lha; util/arc/lzx121r1
+Architecture: m68k-amigaos >= 2.0.4
+Distribution: Aminet
+License:      MIT License
+Source:       https://github.com/Kwezza/WHD-Archive-Extractor
+
+WHD Archive Extractor is a command line tool for the Amiga that scans a
+folder tree for WHDLoad archives and extracts them using Amiga-native
+tools.
+
+It was written mainly for handling larger WHDLoad archive collections on
+the Amiga itself. Extracting these archives on other platforms can
+sometimes cause problems with Amiga file attributes or fukw names, so this
+tool keeps the whole process on the Amiga using the usual archive tools.
+
+The program can scan through subdirectories, preserve the original folder
+layout, and process large numbers of LHA and LZX archives in one run. It
+was originally made to help manage my own WHDLoad folders, then released in
+case it is useful to other people as well.
+
+If you are looking for a way to download and extract WHDLoad archives
+directly on the Amiga, my website below also contains WHDFetch and other
+Workbench-friendly tools:
+https://www.madeforworkbench.com
+
+WHAT'S NEW
+
+This version adds a number of improvements aimed at larger runs
+and repeat use:
+
+- Skip-if-destination-exists mode for avoiding repeat extraction work
+- Quieter and more script-friendly output modes
+- Optional per-run summary file output
+- Better handling when destination drawer preparation fails
+- Optional custom drawer icon support for newly created drawers
+- Test-only mode for checking archives without extracting them
+
+FEATURES
+
+- Scans input folders and subfolders for LHA and LZX archives
+- Extracts archives using Amiga archive tools already installed in C:
+- Preserves the subfolder structure from the source path
+- Can test archives without extracting them
+- Can skip archives whose destination drawer already exists
+- Can reduce console output for use in scripts or batch runs
+- Can write a simple summary file for the last run
+- Optional support for applying custom drawer icons to newly created
+  destination folders
+
+REQUIREMENTS
+
+WHDArchiveExtractor requires:
+
+- LHA installed in C:
+- UnLZX or LZX in C: if you want to process LZX archives
+
+Usage:
+  WHDArchiveExtractor <source_directory> <output_directory_path> [options]
+  WHDArchiveExtractor <source_directory> -testarchivesonly [options]
+
+Options:
+  -enablespacecheck             Check free space (20MB min)
+                                before each extract.
+  -testarchivesonly             Test archives only; do not extract.
+  -skipifdestexists             Skip archive if target drawer exists.
+  -quietskips                   Hide skip lines; keep heartbeat.
+  -enablecustomicons            Apply custom icons to new drawers.
+  -debug                        Write timestamped debug log.
+  -output=script|normal|verbose Set output level.
+  -writesummary                 Save run summary file.
+
+
+NOTES
+
+- LHA is required for the program to run.
+- LZX archives need an LZX extractor in C: or they will be skipped.
+- In normal extraction mode, the program preserves the source folder
+  structure beneath the output path.
+- In test-only mode, archives are checked but not unpacked.
+- The skip-if-destination option is a practical shortcut. It checks whether
+  the destination drawer already exists. It does not compare archive
+  contents.
+- Extraction speed will vary a lot depending on the Amiga and storage being
+  used.  Exracting from a real hard drive to the same hard drive could be 
+  painfully slow!
+
+
+MORE TOOLS
+
+For this and other Amiga utilities, including WHDFetch which can download
+and extract WHDLoad archives directly on the Amiga, see:
+
+https://www.madeforworkbench.com/
+
+FEEDBACK
+
+Feedback and suggestions are welcome via the author's contact details above
+or through the project pages.
+
+CHANGELOG:
+[1.0.0] - 2023-04-28
+- First release
+
+[1.1.0] - 2024-03-12
+- Added LZX archive support.
+- Improved error handling.
+- Existing target folders are now scanned for protected files and
+  protection bits are cleared so files can be replaced if needed.
+
+[1.1.1] - 2024-03-15
+- Fixed typos and text alignment issues.
+
+[1.2.0] - 2025-05-06
+- Added proper support for both UnLZX 2.16 and LZX 1.21.
+- Fixed misleading LZX support wording from earlier versions.
+  - Thanks to Ed Brindley for reporting this.
+
+[1.2.1] - 2025-05-10
+- Fixed buffer overflow issues and a memory leak.
+- Added DOS version cookie.
+
+[2.0.0] - 2026-04-20
+- Added source-only `-testarchivesonly` mode.
+- Added `-skipifdestexists` for faster reruns.
+- Added `-quietskips` to reduce skip output noise.
+- Added `-output=script|normal|verbose`.
+- Added `-writesummary` fixed summary report output.
+- Added `New-[timestamp].txt` log for newly extracted archives.
+- Added `test_errors-[timestamp].txt` log for failed archive tests.
+- Added proactive destination drawer creation.
+- Added optional custom drawer icon support with `-enablecustomicons`.
+
+- Fixed rerun overwrite problems caused by protection reset command issues.
+- Fixed false corrupt-archive reports on some reruns.
+- Fixed LZX test command handling for LZX 1.21.
+- Fixed test-mode wording so test runs no longer look like extraction runs.
+- Fixed handling of unsupported LZX testing under UnLZX 2.16.
+- Fixed incorrect `-enablespacecheck` option text in runtime output.

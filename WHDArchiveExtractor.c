@@ -1983,7 +1983,7 @@ int main(int argc, char *argv[])
   /* Grey text:   printf("\x1B[33m 33:\x1B[0m \n"); */
 
     printf("\n");
-    printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", VERSION_STRING);
+    printf("\x1B[1m\x1B[32m%s V%s\x1B[0m\x1B[0m  \n", PROGRAM_NAME, VERSION_STRING);
 
   if (current_output_level != OUTPUT_MINIMAL)
   {
@@ -2413,7 +2413,7 @@ if (!does_file_exist("c:unlzx"))
     printf("Archive test result: no damaged archives found.\n");
   }
 
-  printf("\nWHDArchiveExtractor V%s\n\n", VERSION_STRING);
+  printf("\n%s V%s\n\n", PROGRAM_NAME, VERSION_STRING);
   return 0;
 }
 
