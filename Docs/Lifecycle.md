@@ -43,6 +43,8 @@ Supported options:
 - -output=script|normal|verbose
 - -writesummary
 
+All options are normalized to lowercase and must start with a leading -.
+
 Important parsing behavior:
 
 1. The second argument can be treated as an option (not destination) when it begins with -.

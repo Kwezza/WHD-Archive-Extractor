@@ -1046,11 +1046,7 @@ int parse_output_level_argument(const char *argument, int *parsed_level)
     return 0;
   }
 
-  if (starts_with_ignore_case(argument, "OUTPUT="))
-  {
-    value = argument + 7;
-  }
-  else if (starts_with_ignore_case(argument, "-output="))
+  if (starts_with_ignore_case(argument, "-output="))
   {
     value = argument + 8;
   }
@@ -1948,11 +1944,7 @@ int main(int argc, char *argv[])
 
   if (argc >= 3)
   {
-    if (argv[2][0] == '-' ||
-        starts_with_ignore_case(argv[2], "OUTPUT=") ||
-        starts_with_ignore_case(argv[2], "-output=") ||
-        equals_ignore_case(argv[2], "WRITESUMMARY") ||
-        strcmp(argv[2], "-writesummary") == 0)
+    if (argv[2][0] == '-')
     {
       second_arg_looks_like_option = 1;
       pre_option_start_index = 2;
@@ -1967,7 +1959,7 @@ int main(int argc, char *argv[])
       continue;
     }
 
-    if (equals_ignore_case(argv[i], "WRITESUMMARY") || strcmp(argv[i], "-writesummary") == 0)
+    if (strcmp(argv[i], "-writesummary") == 0)
     {
       write_summary_enabled = true;
     }
@@ -2072,8 +2064,8 @@ if (!does_file_exist("c:unlzx"))
       "  -quietskips                   Hide skip lines; keep heartbeat.\n"
       "  -enablecustomicons            Apply custom icons to new drawers.\n"
       "  -debug                        Write timestamped debug log.\n"
-      "  OUTPUT=SCRIPT|NORMAL|VERBOSE Set output level (also supports -output=...).\n"
-      "  WRITESUMMARY                  Save run summary file (also supports -writesummary).\n\n");
+      "  -output=script|normal|verbose Set output level.\n"
+      "  -writesummary                 Save run summary file.\n\n");
     return 1;
   }
 
@@ -2142,10 +2134,10 @@ if (!does_file_exist("c:unlzx"))
     output_parse_result = parse_output_level_argument(argv[i], &current_output_level);
     if (output_parse_result == -1)
     {
-      printf("Warning: invalid OUTPUT value '%s'. Valid values are SCRIPT, NORMAL, VERBOSE.\n", argv[i]);
+      printf("Warning: invalid -output value '%s'. Valid values are script, normal, verbose.\n", argv[i]);
     }
 
-    if (equals_ignore_case(argv[i], "WRITESUMMARY") || strcmp(argv[i], "-writesummary") == 0)
+    if (strcmp(argv[i], "-writesummary") == 0)
     {
       write_summary_enabled = true;
     }

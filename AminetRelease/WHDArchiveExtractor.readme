@@ -5,9 +5,8 @@ Type:         util/arc
 Version:      2.0
 Requires:     util/arc/lha; util/arc/lzx121r1
 Architecture: m68k-amigaos >= 2.0.4
-Distribution: Aminet
-License:      MIT License
-Source:       https://github.com/Kwezza/WHD-Archive-Extractor
+
+
 
 WHD Archive Extractor is a command line tool for the Amiga that scans a
 folder tree for WHDLoad archives and extracts them using Amiga-native
@@ -15,8 +14,8 @@ tools.
 
 It was written mainly for handling larger WHDLoad archive collections on
 the Amiga itself. Extracting these archives on other platforms can
-sometimes cause problems with Amiga file attributes or fukw names, so this
-tool keeps the whole process on the Amiga using the usual archive tools.
+sometimes cause problems with Amiga file attributes or file names, so this
+tool keeps the whole process on the Amiga using the native archive tools.
 
 The program can scan through subdirectories, preserve the original folder
 layout, and process large numbers of LHA and LZX archives in one run. It
@@ -25,7 +24,7 @@ case it is useful to other people as well.
 
 If you are looking for a way to download and extract WHDLoad archives
 directly on the Amiga, my website below also contains WHDFetch and other
-Workbench-friendly tools:
+Workbench-friendly tools and source code:
 https://www.madeforworkbench.com
 
 WHAT'S NEW
@@ -64,6 +63,7 @@ Usage:
   WHDArchiveExtractor <source_directory> -testarchivesonly [options]
 
 Options:
+  (All options are lowercase and start with a leading '-')
   -enablespacecheck             Check free space (20MB min)
                                 before each extract.
   -testarchivesonly             Test archives only; do not extract.

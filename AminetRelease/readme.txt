@@ -89,7 +89,6 @@ OPTIONS
       test_errors-YYYYMMDD-HHMMSS.txt
 
 -skipifdestexists
-
     In extraction mode, skips any archive whose resolved destination
     drawer already exists.  This is useful for repeat runs over the same
     source folder to avoid re-extracting archives that were already
