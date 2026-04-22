@@ -53,18 +53,29 @@
 */  
 
 
+/* ========================================================================== */
+/* SECTION: INCLUDES                                                          */
+/* ========================================================================== */
+
 #include <ctype.h>
 #include <dos/dos.h>
 #include <exec/memory.h>
 #include <exec/types.h>
 #include <proto/dos.h>
 #include <proto/exec.h>
+#include <proto/icon.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <workbench/icon.h>
 
 
+
+/* ========================================================================== */
+/* SECTION: CONSTANTS, MACROS, ENUMS, GLOBALS                                 */
+/* ========================================================================== */
 
 #define bool int
 #define true 1
@@ -73,34 +84,66 @@
 #define MAX_ERROR_LENGTH 256
 #define DEBUG 1
 #define BUFFER_SIZE 1024
+#define MAX_TRACKED_DESTINATIONS 1024
+#define MAX_PATH_LENGTH 256
+#define MAX_AMIGA_COMPONENT_LENGTH 30
+#define MAX_CONFLICT_SAMPLES 10
+#define ICON_APPLIER_MAX_PATH 512
+#define ICON_APPLIER_DEFAULT_ICONS_DIR "PROGDIR:Icons"
+#define MAX_LOG_FILENAME_LENGTH 128
+#define MAX_LOG_LINE_LENGTH 768
+#define OUTPUT_MINIMAL 0
+#define OUTPUT_NORMAL 1
+#define OUTPUT_VERBOSE 2
+#define LAST_RUN_SUMMARY_FILENAME "PROGDIR:WHDArchiveExtractor_last_run.txt"
 
+typedef struct icon_applier_options
+{
+  BOOL use_custom_icons;
+  const char *icons_dir;
+} icon_applier_options;
+
+bool skip_disk_space_check = false, test_archives_only = false, skip_if_dest_exists = false, enable_custom_icons = false, quiet_skips = false, debug_mode = false;
+bool unlzx_is_216 = false;
+bool lzx_test_skip_notice_printed = false;
+int  current_output_level = OUTPUT_NORMAL;
+bool write_summary_enabled = false;
 
 #define PROGRAM_NAME "WHD Archive Extractor"
-#define VERSION_STRING "1.2.1"
-#define VERSION_DATE "09.05.2025"
+#define VERSION_STRING "2.0"
+#define VERSION_DATE "20.04.2026"
 
-bool skip_disk_space_check = false, test_archives_only = false;
 char *input_file_path;
 char *output_file_path;
 char single_error_message[MAX_ERROR_LENGTH];
 char error_messages_array[MAX_ERRORS][MAX_ERROR_LENGTH];
-
 int  num_archives_found;
 int  error_count = 0;
 int  num_directories_scanned;
 int  should_stop_app = 0; /* used to stop the app if the lha extraction fails */
 long start_time;
+int  destination_tracking_overflow_warned = 0;
 int  reset_protection_bits = 1;
 char lzx_extract_command[9];  
 char lzx_extract_target_command[4];
+char debug_log_filename[MAX_LOG_FILENAME_LENGTH];
+char new_extract_log_filename[MAX_LOG_FILENAME_LENGTH];
+char test_errors_log_filename[MAX_LOG_FILENAME_LENGTH];
+int  new_extract_log_enabled = 0;
+int  new_extract_log_count = 0;
+int  test_errors_log_enabled = 0;
+int  test_errors_log_count = 0;
 const char *version = "$VER: " PROGRAM_NAME " " VERSION_STRING " (" VERSION_DATE ") compiled " __DATE__ " " __TIME__ "";
-
 
 STRPTR input_directory_path;
 
 STRPTR output_directory_path;
+icon_applier_options drawer_icon_options = {FALSE, ICON_APPLIER_DEFAULT_ICONS_DIR};
 
-/* Function prototypes */
+/* ========================================================================== */
+/* SECTION: FORWARD DECLARATIONS                                              */
+/* ========================================================================== */
+
 char *get_file_path(const char *full_path);
 char *remove_text(char *input_str, STRPTR text_to_remove);
 int   check_disk_space(STRPTR path, int min_space_mb);
@@ -110,16 +153,62 @@ int   does_folder_exists(const char *folder_name);
 void  sanitize_amiga_path(char *path);
 void  get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path);
 void  log_error(const char *errorMessage);
+void  append_log_line(const char *filename, const char *line);
+int   build_timestamped_log_filename(const char *prefix, char *output_buffer, size_t output_buffer_size);
 void  print_errors(void);
 void  remove_trailing_slash(char *str);
 char *find_first_directory(char *filePath);
 char *get_file_extension(const char *filename, char *outputBuffer);
+int   equals_ignore_case(const char *left, const char *right);
+int   starts_with_ignore_case(const char *text, const char *prefix);
+int   parse_output_level_argument(const char *argument, int *parsed_level);
+const char *output_mode_to_text(int output_level);
+int   write_summary_line(BPTR summary_file, const char *format, ...);
+int   write_last_run_summary(long elapsed_seconds);
+int   get_path_state(const char *path);
+int   is_destination_claimed(const char *destination_path, char *claimed_destinations[], int claimed_destinations_count);
+int   add_claimed_destination(const char *destination_path, char *claimed_destinations[], int *claimed_destinations_count);
+void  free_claimed_destinations(char *claimed_destinations[], int claimed_destinations_count);
+int   ensure_directory_exists(const char *path, int *created);
+int   ensure_path_directories(const char *base_root, const char *full_target_path, int *created_count);
+BOOL  icon_applier_exists(const char *path);
+void  icon_applier_sanitize_path(char *path);
+const char *icon_applier_get_icons_dir(const icon_applier_options *options);
+BOOL  icon_applier_ensure_drawer_icon(const char *dir_path, const icon_applier_options *options);
 char *get_executable_version(const char *filePath);
+void  record_destination_conflict_sample(const char *destination_path);
+
+/* ========================================================================== */
+/* SECTION: RUNTIME COUNTERS AND STATS                                        */
+/* ========================================================================== */
 
 int num_lzx_archives_found = 0;
 int num_lha_archives_found = 0;
+int num_archives_skipped_dest_exists = 0;
+int num_destination_conflicts = 0;
+int num_destination_not_drawer_conflicts = 0;
+int num_directories_created = 0;
+int num_drawer_icons_attempted = 0;
+int num_drawer_icons_applied = 0;
+int num_drawer_icons_failed = 0;
+int num_archives_extracted = 0;
+int num_lzx_archives_skipped_test_unsupported = 0;
+int num_path_prep_fallbacks = 0;
+char destination_conflict_samples[MAX_CONFLICT_SAMPLES][MAX_PATH_LENGTH];
+int conflict_sample_count = 0;
+int conflict_sample_omitted_count = 0;
 
+#define QUIET_HEARTBEAT_INTERVAL 250
 
+/* ========================================================================== */
+/* SECTION: ARGUMENT PARSING                                                  */
+/* ========================================================================== */
+
+/* Argument parsing is intentionally kept in main() as part of startup flow. */
+
+/* ========================================================================== */
+/* SECTION: PATH AND FILENAME HELPERS                                         */
+/* ========================================================================== */
 
 /**
  * @brief Sanitizes an Amiga file path in-place by correcting specific path issues.
@@ -274,688 +363,6 @@ char *get_file_path(const char *full_path)
   return file_path;
 }
 
-/**
- * @brief Checks if a file exists by attempting to open it for reading.
- *
- * Tries to open the specified file in read mode. If successful, the file exists.
- *
- * @param filename The name (and path) of the file to check.
- * @return 1 if the file exists, 0 otherwise.
- */
-int does_file_exist(char *filename)
-{
-  FILE *file;
-  /* Try to open the file for reading*/
-  if ((file = fopen(filename, "r")))
-  {
-    /* If successful, close the file and return 1*/
-    fclose(file);
-    return 1;
-  }
-  else
-  {
-    /* If not successful, return 0*/
-    return 0;
-  }
-}
-
-/**
- * @brief Checks if a folder (directory) exists.
- *
- * Attempts to lock the specified folder for reading. If successful, the folder exists.
- *
- * @param folder_name The name (and path) of the folder to check.
- * @return 1 if the folder exists, 0 otherwise.
- */
-int does_folder_exists(const char *folder_name)
-{
-  BPTR lock = Lock((CONST_STRPTR)folder_name, ACCESS_READ);
-  if (lock != 0)
-  {
-    UnLock(lock);
-    return 1; /* Folder exists*/
-  }
-  else
-  {
-    return 0; /* Folder does not exist */
-  }
-}
-
-/**
- * @brief Removes a trailing slash from a string, if present.
- *
- * Modifies the input string in-place to remove a trailing '/' character, if it exists.
- *
- * @param str The string to modify. Must be a writable, null-terminated string.
- */
-void remove_trailing_slash(char *str)
-{
-  if (str != NULL && strlen(str) > 0 && str[strlen(str) - 1] == '/')
-  {
-    str[strlen(str) - 1] = '\0';
-  }
-}
-
-/**
- * @brief Logs an error message to the error message array.
- *
- * Copies the provided error message into the global error message array and increments the error count.
- * Ensures the message is null-terminated and does not exceed the maximum allowed length.
- *
- * @param errorMessage The error message to log.
- */
-void log_error(const char *errorMessage)
-{
-  if (error_count >= MAX_ERRORS)
-  {
-    return;
-  }
-
-  if (errorMessage == NULL)
-  {
-    error_messages_array[error_count][0] = '\0';
-  }
-  else
-  {
-    strncpy(error_messages_array[error_count], errorMessage, MAX_ERROR_LENGTH - 1);
-    error_messages_array[error_count][MAX_ERROR_LENGTH - 1] = '\0'; /* Ensure null-termination */
-  }
-  error_count++;
-}
-
-/**
- * @brief Prints all logged error messages to the console.
- *
- * If any errors have been logged, prints them in a formatted list. Otherwise, prints a message indicating no errors.
- */
-void print_errors()
-{
-  int i;
-  if (error_count > 0)
-  {
-    printf("\n\x1B[1mErrors encountered during execution:\x1B[0m\n");
-    for (i = 0; i < error_count; i++)
-    {
-      printf("\x1B[1mError:\x1B[0m %d: %s\n", i + 1, error_messages_array[i]);
-    }
-  }
-  else
-  {
-    printf("\nNo errors encountered.\n");
-  }
-}
-
-char *find_first_directory(char *filePath)
-{
-  static char directoryName[256]; /* Static buffer to hold the directory name */
-  FILE *file;
-  char line[256]; /* Buffer to read each line into */
-
-  if (does_file_exist(filePath) == 0)
-  {
-    printf("File does not exist: %s\n", filePath);
-    return NULL; /* Return NULL if file can't be opened */
-  }
-
-  /* Open the file for reading */
-  if ((file = fopen(filePath, "r")) == NULL)
-  {
-    return NULL; /* Return NULL if file can't be opened */
-  }
-
-  while (fgets(line, sizeof(line), file) != NULL)
-  {                                          /* Read each line */
-    char *slashPosition = strchr(line, '/'); /* Find the first '/' */
-    if (slashPosition != NULL)
-    {
-      /* Calculate the directory name length */
-      int dirLength = slashPosition - line;
-      /* Copy the directory name to the static buffer */
-      strncpy(directoryName, line, dirLength);
-      directoryName[dirLength] = '\0'; /* Null-terminate the string */
-      fclose(file);                    /* Close the file */
-      return directoryName;            /* Return the directory name */
-    }
-  }
-
-  fclose(file); /* Close the file if no directory is found */
-  return NULL;  /* Return NULL if no directory is found */
-}
-
-void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path)
-{
-  BPTR dir_lock;
-  char file_extension[5];
-  char current_file_path[256];
-  char ExtractCommand[20];
-  char extraction_command[256];
-  char ExtractTargetCommand[4];
-  char *directoryName;
-  char program_name[16];
-  char fileCommandStore[256];
-  LONG command_result;
-  char *file_path_tmp = NULL;
-  size_t needed = 0;
-  struct FileInfoBlock *file_info_block;
-  reset_protection_bits = 1;
-
-  printf("Scanning directory: %s\n", input_directory_path);
-
-  dir_lock = Lock((CONST_STRPTR)input_directory_path, ACCESS_READ);
-  if (dir_lock)
-  {
-    file_info_block = (struct FileInfoBlock *)AllocMem(sizeof(struct FileInfoBlock), MEMF_CLEAR);
-    if (file_info_block)
-    {
-      if (Examine(dir_lock, file_info_block))
-      {
-        while (ExNext(dir_lock, file_info_block) && should_stop_app == 0)
-        {
-          if (strcmp(file_info_block->fib_FileName, ".") != 0 && strcmp(file_info_block->fib_FileName, "..") != 0)
-          {
-            num_directories_scanned++;
-
-            /* Safe construction of current_file_path */
-            needed = strlen(input_directory_path) + 1 + strlen(file_info_block->fib_FileName) + 1;
-            if (needed <= sizeof(current_file_path)) {
-                strcpy(current_file_path, input_directory_path);
-                strcat(current_file_path, "/");
-                strcat(current_file_path, file_info_block->fib_FileName);
-            } else {
-                printf("Error: Path too long for current_file_path buffer.\n");
-                log_error("Path too long for current_file_path buffer.");
-                continue;
-            }
-            sanitize_amiga_path(current_file_path);
-
-            if (file_info_block->fib_DirEntryType > 0)
-            {
-              num_directories_scanned++;
-
-              get_directory_contents(current_file_path, output_directory_path);
-            }
-            else
-            {
-              if (get_file_extension(file_info_block->fib_FileName, file_extension) == NULL)
-              {
-                continue;
-              }
-
-              if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
-              {
-                file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
-                if (file_path_tmp) {
-                    needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1;
-                    if (needed <= sizeof(fileCommandStore)) {
-                        strcpy(fileCommandStore, output_directory_path);
-                        strcat(fileCommandStore, "/");
-                        strcat(fileCommandStore, file_path_tmp);
-                    } else {
-                        printf("Error: Path too long for fileCommandStore buffer.\n");
-                        log_error("Path too long for fileCommandStore buffer.");
-                        FreeVec(file_path_tmp);
-                        file_path_tmp = NULL;
-                        continue;
-                    }
-                } else {
-                    printf("Error: get_file_path returned NULL.\n");
-                    continue;
-                }
-                sanitize_amiga_path(fileCommandStore);
-                printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
-                FreeVec(file_path_tmp);
-                file_path_tmp = NULL;
-                if (strcmp(file_extension, ".LHA") == 0)
-                {
-                  num_lha_archives_found++;
-                  strcpy(ExtractTargetCommand, "  \0");
-                  strcpy(program_name, "lha");
-                  if (test_archives_only)
-                  {
-                    strcpy(ExtractCommand, "t\0");
-                  }
-                  else
-                  {
-                    strcpy(ExtractCommand, "-T -M -N -m x\0");
-
-                    if (reset_protection_bits == 1)
-                    {
-
-                      sprintf(extraction_command, "c:lha vq \"%s\" >ram:listing.txt", current_file_path);
-                      sanitize_amiga_path(extraction_command);
-                      SystemTagList(extraction_command, NULL);
-                      directoryName = find_first_directory("ram:listing.txt");
-                      if (directoryName != NULL)
-                      {
-                        file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
-                        if (file_path_tmp) {
-                            needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1 + strlen(directoryName) + 1;
-                            if (needed <= sizeof(fileCommandStore)) {
-                                strcpy(fileCommandStore, output_directory_path);
-                                strcat(fileCommandStore, "/");
-                                strcat(fileCommandStore, file_path_tmp);
-                                strcat(fileCommandStore, "/");
-                                strcat(fileCommandStore, directoryName);
-                            } else {
-                                printf("Error: Path too long for fileCommandStore buffer.\n");
-                                log_error("Path too long for fileCommandStore buffer.");
-                                FreeVec(file_path_tmp);
-                                file_path_tmp = NULL;
-                                continue;
-                            }
-                        } else {
-                            printf("Error: get_file_path returned NULL.\n");
-                            continue;
-                        }
-                        if (directoryName && strlen(fileCommandStore) + 1 < sizeof(fileCommandStore)) {
-                          strncat(fileCommandStore, "/", sizeof(fileCommandStore) - strlen(fileCommandStore) - 1);
-                        }
-                        if (directoryName && strlen(fileCommandStore) + strlen(directoryName) < sizeof(fileCommandStore)) {
-                          strncat(fileCommandStore, directoryName, sizeof(fileCommandStore) - strlen(fileCommandStore) - 1);
-                        }
-                        sanitize_amiga_path(fileCommandStore);
-                        if (does_folder_exists(fileCommandStore) == 1)
-                        {
-                          file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
-                          if (file_path_tmp) {
-                              needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1 + strlen(directoryName) + strlen("/#? ALL rwed >NIL:") + 1;
-                              if (needed <= sizeof(fileCommandStore)) {
-                                  strcpy(fileCommandStore, output_directory_path);
-                                  strcat(fileCommandStore, "/");
-                                  strcat(fileCommandStore, file_path_tmp);
-                                  strcat(fileCommandStore, "/");
-                                  strcat(fileCommandStore, directoryName);
-                                  strcat(fileCommandStore, "/#? ALL rwed >NIL:");
-                              } else {
-                                  printf("Error: Path too long for fileCommandStore buffer (protect).\n");
-                                  log_error("Error: Path too long for extraction_command buffer.");
-                                  FreeVec(file_path_tmp);
-                                  file_path_tmp = NULL;
-                                  continue;
-                              }
-                          } else {
-                              printf("Error: get_file_path returned NULL.\n");
-                              continue;
-                          }
-                          sanitize_amiga_path(fileCommandStore);
-                          printf("Prepping any protected files for potential replacement...\n");
-                          SystemTagList(fileCommandStore, NULL);
-                          FreeVec(file_path_tmp);
-                          file_path_tmp = NULL;
-                        }
-                        FreeVec(file_path_tmp);
-                        file_path_tmp = NULL;
-                      }
-                      else
-                      {
-                        printf("Unable to get the file path from the LHA output for file %s.\n", current_file_path);
-                      }
-                    }
-                    DeleteFile("ram:listing.txt");
-                    ExtractCommand[0] = '\0';
-                    strcpy(ExtractCommand, "-T -M -N -m x\0");
-                  }
-                }
-                else
-                {
-                  num_lzx_archives_found++;
-                  strcpy(ExtractTargetCommand, lzx_extract_target_command);
-                  strcpy(program_name, "c:unlzx");
-                  if (test_archives_only)
-                  {
-                    strcpy(ExtractCommand, "-v\0");
-                  }
-                  else
-                  {
-                    strcpy(ExtractCommand, lzx_extract_command);
-                  }
-                }
-
-                
-                /* Check for disk space before extracting */
-                should_stop_app = 0;
-                if (skip_disk_space_check == false)
-                {
-                  int disk_check_result = check_disk_space(output_directory_path, 20);
-                  if (disk_check_result < 0)
-                  {
-                    /* To do: handle various error cases based
-                       on the result code */
-                    printf(
-                        "\x1B[1mError:\x1B[0m Not enough "
-                        "space on the target drive or cannot "
-                        "check space.\n20MB minimum checked "
-                        "for.  To disable this check, launch "
-                        "the program\nwithout the "
-                        "'-enablediskcheck' command.\n");
-                    should_stop_app = 1;
-                  }
-                }
-                if (should_stop_app == 0)
-                {
-                  num_archives_found++;
-
-                  /* Combine the extraction command, source
-                   * path, and output path */
-                  file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
-                  if (file_path_tmp) {
-                      needed = strlen(program_name) + 1 + strlen(ExtractCommand) + 3 + strlen(current_file_path) + 3 + strlen(ExtractTargetCommand) + 3 + strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 2 + 1;
-                      if (needed <= sizeof(extraction_command)) {
-                          strcpy(extraction_command, program_name);
-                          strcat(extraction_command, " ");
-                          strcat(extraction_command, ExtractCommand);
-                          strcat(extraction_command, " \"");
-                          strcat(extraction_command, current_file_path);
-                          strcat(extraction_command, "\" ");
-                          strcat(extraction_command, ExtractTargetCommand);
-                          strcat(extraction_command, " \"");
-                          strcat(extraction_command, output_directory_path);
-                          strcat(extraction_command, "/");
-                          strcat(extraction_command, file_path_tmp);
-                          strcat(extraction_command, "\"");
-                      } else {
-                          printf("Error: Path too long for extraction_command buffer.\n");
-                          log_error("Error: Path too long for extraction_command buffer.");
-                          FreeVec(file_path_tmp);
-                          file_path_tmp = NULL;
-                          continue;
-                      }
-                  } else {
-                      printf("Error: get_file_path returned NULL.\n");
-                      continue;
-                  }
-                  sanitize_amiga_path(extraction_command);
-                  FreeVec(file_path_tmp);
-                  file_path_tmp = NULL;
-
-
-
-                  /* Execute the command*/
-                  command_result = SystemTagList(extraction_command, NULL);
-
-                  /* Check for error */
-                  if (command_result != 0)
-                  {
-                    if (command_result == 10)
-                    {
-                      printf(
-                          "\n\x1B[1mError:\x1B[0m "
-                          "Corrupt archive %s\n",
-                          current_file_path);
-                      /* Copy the first part of the
-                         message */
-                      strncpy(single_error_message, current_file_path, MAX_ERROR_LENGTH - 1);
-                      single_error_message[MAX_ERROR_LENGTH - 1] = '\0'; /* Ensure null-termination */
-
-                      /* Concatenate the error message if there's space */
-                      if (strlen(single_error_message) + strlen(" is corrupt") < MAX_ERROR_LENGTH)
-                      {
-                        strcat(single_error_message, " is corrupt");
-                      }
-                      log_error(single_error_message);
-                    }
-                    else
-                    {
-                      printf(
-                          "\n\x1B[1mError:\x1B[0m "
-                          "Failed to execute command "
-                          "lha for file %s.\nPlease "
-                          "check the archive is not "
-                          "damaged, and there is "
-                          "enough space in the\ntarget "
-                          "directory.\n",
-                          current_file_path);
-                      /* Copy the first part of the message */
-
-                      strncpy(single_error_message, current_file_path, MAX_ERROR_LENGTH - 1);
-                      single_error_message[MAX_ERROR_LENGTH - 1] = '\0'; /* Ensure null-termination
-
-                     /* Concatenate the error message if there's space */
-                      if (strlen(single_error_message) + strlen(" failed to extract. "
-                                                                "Unknown error") <
-                          MAX_ERROR_LENGTH)
-                      {
-                        strcat(single_error_message,
-                               " failed to extract. "
-                               "Unknown error");
-                      }
-                      log_error(single_error_message);
-                    }
-                  }
-                  /* if the number of errors is greater then MAX_ERRORS, then quit */
-                  if (error_count >= MAX_ERRORS)
-                  {
-                    printf(
-                        "Maximum number of errors "
-                        "reached. Aborting.\n");
-                    should_stop_app = 1;
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-      FreeMem(file_info_block, sizeof(struct FileInfoBlock));
-    }
-    UnLock(dir_lock);
-  }
-}
-
-int check_disk_space(STRPTR path, int min_space_mb)
-{
-  struct InfoData *info = AllocMem(sizeof(struct InfoData), MEMF_CLEAR);
-  BPTR lock = Lock(path, ACCESS_READ);
-  long free_space;
-  int result;
-
-  if (!info)
-    return -1; /* Allocation failed, can't check disk space */
-  if (!lock)
-  {
-    FreeMem(info, sizeof(struct InfoData));
-    return -2; /* Unable to lock the path, can't check disk space */
-  }
-
-  result = 0; /* Default to 0, meaning there's enough space */
-
-  if (Info(lock, info))
-  {
-    /* Convert available blocks to bytes and then to megabytes */
-    free_space = ((long)info->id_NumBlocks - (long)info->id_NumBlocksUsed) * (long)info->id_BytesPerBlock / 1024 / 1024;
-
-#ifdef DEBUG
-    printf("Free space: %ld\n", free_space);
-#endif
-
-    if (free_space < 0)
-    {
-      result = 0; /* Assume very large disk, so return 0 */
-    }
-    else if (free_space < min_space_mb)
-    {
-      result = -3; /* Not enough space */
-    }
-  }
-  else
-  {
-    result = -4; /* Info call failed */
-  }
-
-  UnLock(lock);
-  FreeMem(info, sizeof(struct InfoData));
-  return result;
-}
-
-int main(int argc, char *argv[])
-{
-  int i, disk_check_result;
-  long elapsed_seconds, hours, minutes, seconds;
-  char *versionInfo;
-
-  /* Black text:  printf("\x1B[30m 30:\x1B[0m \n"); */
-  /* White text:  printf("\x1B[31m 31:\x1B[0m \n"); */
-  /* Blue text:   printf("\x1B[32m 32:\x1B[0m \n"); */
-  /* Grey text:   printf("\x1B[33m 33:\x1B[0m \n"); */
-
-  printf("\n");
-  printf("\x1B[1m\x1B[32mWHDArchiveExtractor V%s\x1B[0m\x1B[0m  \n", VERSION_STRING);
-
-  printf(
-      "\x1B[32mThis program is designed to automatically locate "
-      "LHA and LZX archive files\nwithin nested subdirectories, "
-      "extract their contents to a specified\ndestination, and preserve the original directory "
-      "hierarchy in which the \narchives were located.\x1B[0m \n\n");
-
-  if (!does_file_exist("c:lha"))
-  {
-    printf(
-        "File c:lha does not exist. As this program requires it to "
-        "extract the archives, it will now quit. Please install the "
-        "latest version of lha.run from www.aminet.org\n");
-    return 0;
-  }
-
-
-  if (!does_file_exist("c:unlzx"))
-  {
-    printf(
-        "File c:unlzx does not exist. There are a few LZX compressed "
-        "archives for WHDLoad.  This program will continue and ignore these "
-        "archives until UnLZX is installed.  Please install the latest version "
-        "of lzx121r1.lha from www.aminet.org\n");
-
-  }
-  else
-  {
-    versionInfo = get_executable_version("c:unlzx");
-    //printf("UnLZX version: %s", versionInfo);
-
-    if (versionInfo == NULL)
-    {
-      printf("Unable to detect UnLZX version. defaulting extraction command to \" e\"\n");
-      strcpy(lzx_extract_command, " e");
-      strcpy(lzx_extract_target_command, "  ");
-    }
-    else if (strcmp(versionInfo, "UnLZX 2.16") == 0)
-    {
-      strcpy(lzx_extract_command, "-x");
-      strcpy(lzx_extract_target_command, "-o");
-      printf("UnLZX version recognised as UnLZX 2.16.\n");
-    }
-    else if (strcmp(versionInfo, "LZX 1.21") == 0)
-    {
-      strcpy(lzx_extract_command, "-q -x e");
-      strcpy(lzx_extract_target_command, "  ");
-      printf("UnLZX version recognised as LZX 1.21 \n");
-    }
-    else
-    {
-      /* default to " e" for now */
-      strcpy(lzx_extract_command, " e");
-      printf("Unknown UnLZX version.  defaulting extraction command to %s\n", lzx_extract_command);
-    }
-
-    if (versionInfo != NULL)
-    {
-      FreeVec(versionInfo);
-    }
-  }
-
-  if (argc < 3)
-  {
-    printf(
-        "\x1B[1mUsage:\x1B[0m WHDArchiveExtractor <source_directory> "
-        "<output_directory_path> [-enablespacecheck (experimental)] \n\n");
-    return 1;
-  }
-
-  input_directory_path = argv[1];
-  output_directory_path = argv[2];
-
-  skip_disk_space_check = true;
-  for (i = 3; i < argc; i++)
-  {
-    if (strcmp(argv[i], "-enablespacecheck") == 0)
-    {
-      skip_disk_space_check = false;
-    }
-    if (strcmp(argv[i], "-testarchivesonly") == 0)
-    {
-      test_archives_only = true;
-    }
-  }
-
-  remove_trailing_slash(input_directory_path);
-  remove_trailing_slash(output_directory_path);
-
-  input_file_path = input_directory_path;
-
-  printf("\x1B[1mScanning directory:    \x1B[0m %s\n", input_directory_path);
-  printf("\x1B[1mExtracting archives to:\x1B[0m %s\n", output_directory_path);
-
-  if (does_folder_exists(input_directory_path) == 0)
-  {
-    printf("\nUnable to find the source folder %s\n\n", input_directory_path);
-    return 0;
-  }
-  if (does_folder_exists(output_directory_path) == 0)
-  {
-    printf("\nUnable to find the target folder %s\n\n", output_directory_path);
-    return 0;
-  }
-
-  if (!skip_disk_space_check)
-  {
-    disk_check_result = check_disk_space(output_directory_path, 20);
-    if (disk_check_result < 0)
-    {
-      /* To do: handle various error cases based on the result code*/
-      printf(
-          "\n\x1B[1mError:\x1B[0m Not enough space on the target drive "
-          "or cannot check space.\n20MB minimum checked for.  To "
-          "disable this check, do not launch the\nprogram with the "
-          "\x1B[3m-enablespacecheck\x1B[23m command.\n\n");
-      return 0;
-    }
-  }
-
-  /* Start timer */
-  start_time = time(NULL);
-
-  get_directory_contents(input_directory_path, output_directory_path);
-
-  /* Calculate elapsed time */
-  elapsed_seconds = time(NULL) - start_time;
-  hours = elapsed_seconds / 3600;
-  minutes = (elapsed_seconds % 3600) / 60;
-  seconds = elapsed_seconds % 60;
-  printf(
-      "Scanned \x1B[1m%d\x1B[0m directories and found \x1B[1m%d\x1B[0m "
-      "archives.\n",
-      num_directories_scanned, num_lha_archives_found + num_lzx_archives_found);
-  printf(
-      "Archives composed of \x1B[1m%d\x1B[0m LHA and \x1B[1m%d\x1B[0m "
-      "LZX archives.\n",
-      num_lha_archives_found, num_lzx_archives_found);
-
-  if (num_lzx_archives_found > 0)
-  {
-    if (!does_file_exist("c:unlzx"))
-    {
-
-      printf(
-          "UnLZX is not installed.  \x1B[1m%d\x1B[0m LZX archives were found but not expanded.\n",
-          num_lzx_archives_found);
-    }
-  }
-
-  printf("\nElapsed time: \x1B[1m%ld:%02ld:%02ld\x1B[0m\n", hours, minutes, seconds);
-  print_errors();
-  printf("\nWHDArchiveExtractor V%s\n\n", VERSION_STRING);
-  return 0;
-}
-
 char *get_executable_version(const char *filePath)
 {
     char command[256];
@@ -1011,4 +418,1995 @@ char *get_executable_version(const char *filePath)
 
     return versionBuffer;
 }
+
+/**
+ * @brief Removes a trailing slash from a string, if present.
+ *
+ * Modifies the input string in-place to remove a trailing '/' character, if it exists.
+ *
+ * @param str The string to modify. Must be a writable, null-terminated string.
+ */
+void remove_trailing_slash(char *str)
+{
+  if (str != NULL && strlen(str) > 0 && str[strlen(str) - 1] == '/')
+  {
+    str[strlen(str) - 1] = '\0';
+  }
+}
+
+/* ========================================================================== */
+/* SECTION: ARCHIVE-TYPE DETECTION AND COMMAND BUILDING                       */
+/* ========================================================================== */
+
+char *find_first_directory(char *filePath)
+{
+  static char directoryName[256]; /* Static buffer to hold the directory name */
+  FILE *file;
+  char line[256]; /* Buffer to read each line into */
+
+  if (does_file_exist(filePath) == 0)
+  {
+    printf("File does not exist: %s\n", filePath);
+    return NULL; /* Return NULL if file can't be opened */
+  }
+
+  /* Open the file for reading */
+  if ((file = fopen(filePath, "r")) == NULL)
+  {
+    return NULL; /* Return NULL if file can't be opened */
+  }
+
+  while (fgets(line, sizeof(line), file) != NULL)
+  {                                          /* Read each line */
+    char *slashPosition = strchr(line, '/'); /* Find the first '/' */
+    if (slashPosition != NULL)
+    {
+      /* Calculate the directory name length */
+      int dirLength = slashPosition - line;
+      /* Copy the directory name to the static buffer */
+      strncpy(directoryName, line, dirLength);
+      directoryName[dirLength] = '\0'; /* Null-terminate the string */
+      fclose(file);                    /* Close the file */
+      return directoryName;            /* Return the directory name */
+    }
+  }
+
+  fclose(file); /* Close the file if no directory is found */
+  return NULL;  /* Return NULL if no directory is found */
+}
+
+/**
+ * @brief Checks if a file exists by attempting to open it for reading.
+ *
+ * Tries to open the specified file in read mode. If successful, the file exists.
+ *
+ * @param filename The name (and path) of the file to check.
+ * @return 1 if the file exists, 0 otherwise.
+ */
+/* ========================================================================== */
+/* SECTION: DESTINATION RESOLUTION AND SKIP LOGIC                             */
+/* ========================================================================== */
+
+int does_file_exist(char *filename)
+{
+  FILE *file;
+  /* Try to open the file for reading*/
+  if ((file = fopen(filename, "r")))
+  {
+    /* If successful, close the file and return 1*/
+    fclose(file);
+    return 1;
+  }
+  else
+  {
+    /* If not successful, return 0*/
+    return 0;
+  }
+}
+
+/**
+ * @brief Checks if a folder (directory) exists.
+ *
+ * Attempts to lock the specified folder for reading. If successful, the folder exists.
+ *
+ * @param folder_name The name (and path) of the folder to check.
+ * @return 1 if the folder exists, 0 otherwise.
+ */
+int does_folder_exists(const char *folder_name)
+{
+  BPTR lock = Lock((CONST_STRPTR)folder_name, ACCESS_READ);
+  if (lock != 0)
+  {
+    UnLock(lock);
+    return 1; /* Folder exists*/
+  }
+  else
+  {
+    return 0; /* Folder does not exist */
+  }
+}
+
+/*
+ * Returns destination path state:
+ *  1 = exists and is a directory
+ *  0 = does not exist or cannot be examined
+ * -1 = exists but is not a directory
+ */
+int get_path_state(const char *path)
+{
+  BPTR lock;
+  int path_state;
+  struct FileInfoBlock *file_info_block;
+
+  lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+  if (lock == 0)
+  {
+    return 0;
+  }
+
+  path_state = 0;
+  file_info_block = (struct FileInfoBlock *)AllocMem(sizeof(struct FileInfoBlock), MEMF_CLEAR);
+  if (file_info_block)
+  {
+    if (Examine(lock, file_info_block))
+    {
+      if (file_info_block->fib_DirEntryType > 0)
+      {
+        path_state = 1;
+      }
+      else
+      {
+        path_state = -1;
+      }
+    }
+    FreeMem(file_info_block, sizeof(struct FileInfoBlock));
+  }
+
+  UnLock(lock);
+  return path_state;
+}
+
+int is_destination_claimed(const char *destination_path, char *claimed_destinations[], int claimed_destinations_count)
+{
+  int i;
+
+  for (i = 0; i < claimed_destinations_count; i++)
+  {
+    if (strcmp(claimed_destinations[i], destination_path) == 0)
+    {
+      return 1;
+    }
+  }
+
+  return 0;
+}
+
+int add_claimed_destination(const char *destination_path, char *claimed_destinations[], int *claimed_destinations_count)
+{
+  size_t destination_length;
+
+  if (*claimed_destinations_count >= MAX_TRACKED_DESTINATIONS)
+  {
+    return 0;
+  }
+
+  destination_length = strlen(destination_path) + 1;
+  claimed_destinations[*claimed_destinations_count] = (char *)AllocVec(destination_length, MEMF_ANY);
+  if (claimed_destinations[*claimed_destinations_count] == NULL)
+  {
+    return 0;
+  }
+
+  strcpy(claimed_destinations[*claimed_destinations_count], destination_path);
+  (*claimed_destinations_count)++;
+  return 1;
+}
+
+void free_claimed_destinations(char *claimed_destinations[], int claimed_destinations_count)
+{
+  int i;
+
+  for (i = 0; i < claimed_destinations_count; i++)
+  {
+    if (claimed_destinations[i] != NULL)
+    {
+      FreeVec(claimed_destinations[i]);
+      claimed_destinations[i] = NULL;
+    }
+  }
+}
+
+void record_destination_conflict_sample(const char *destination_path)
+{
+  const char *relative_path;
+  int i;
+
+  if (destination_path == NULL || output_directory_path == NULL)
+  {
+    return;
+  }
+
+  relative_path = remove_text((char *)destination_path, output_directory_path);
+  if (relative_path == NULL || relative_path[0] == '\0')
+  {
+    return;
+  }
+
+  for (i = 0; i < conflict_sample_count; i++)
+  {
+    if (strcmp(destination_conflict_samples[i], relative_path) == 0)
+    {
+      return;
+    }
+  }
+
+  if (conflict_sample_count < MAX_CONFLICT_SAMPLES)
+  {
+    strncpy(destination_conflict_samples[conflict_sample_count], relative_path, MAX_PATH_LENGTH - 1);
+    destination_conflict_samples[conflict_sample_count][MAX_PATH_LENGTH - 1] = '\0';
+    conflict_sample_count++;
+  }
+  else
+  {
+    conflict_sample_omitted_count++;
+  }
+}
+
+/* ========================================================================== */
+/* SECTION: DIRECTORY PREPARATION                                             */
+/* ========================================================================== */
+
+int ensure_directory_exists(const char *path, int *created)
+{
+  BPTR created_lock;
+  int path_state;
+
+  if (created != NULL)
+  {
+    *created = 0;
+  }
+
+  path_state = get_path_state(path);
+  if (path_state == 1)
+  {
+    return 1;
+  }
+
+  if (path_state == -1)
+  {
+    return -1;
+  }
+
+  created_lock = CreateDir((CONST_STRPTR)path);
+  if (created_lock == 0)
+  {
+    return 0;
+  }
+
+  UnLock(created_lock);
+
+  if (get_path_state(path) == 1)
+  {
+    if (created != NULL)
+    {
+      *created = 1;
+    }
+    return 1;
+  }
+
+  return 0;
+}
+
+int ensure_path_directories(const char *base_root, const char *full_target_path, int *created_count)
+{
+  int status;
+  int created;
+  size_t base_length;
+  size_t current_length;
+  size_t component_length;
+  size_t new_length;
+  char current_path[MAX_PATH_LENGTH];
+  const char *relative_path;
+  const char *component_start;
+  const char *separator;
+
+  if (created_count != NULL)
+  {
+    *created_count = 0;
+  }
+
+  if (base_root == NULL || full_target_path == NULL)
+  {
+    return 0;
+  }
+
+  if (strlen(base_root) >= sizeof(current_path) || strlen(full_target_path) >= sizeof(current_path))
+  {
+    return 0;
+  }
+
+  strcpy(current_path, base_root);
+  sanitize_amiga_path(current_path);
+  icon_applier_sanitize_path(current_path);
+  remove_trailing_slash(current_path);
+
+  if (get_path_state(current_path) != 1)
+  {
+    return 0;
+  }
+
+  base_length = strlen(current_path);
+  if (strncmp(full_target_path, current_path, base_length) != 0)
+  {
+    return 0;
+  }
+
+  relative_path = full_target_path + base_length;
+  while (*relative_path == '/')
+  {
+    relative_path++;
+  }
+
+  if (*relative_path == '\0')
+  {
+    return 1;
+  }
+
+  component_start = relative_path;
+  while (*component_start != '\0')
+  {
+    separator = strchr(component_start, '/');
+    if (separator != NULL)
+    {
+      component_length = (size_t)(separator - component_start);
+    }
+    else
+    {
+      component_length = strlen(component_start);
+    }
+
+    if (component_length == 0 || component_length > MAX_AMIGA_COMPONENT_LENGTH)
+    {
+      return 0;
+    }
+
+    if ((component_length == 1 && component_start[0] == '.') ||
+        (component_length == 2 && component_start[0] == '.' && component_start[1] == '.'))
+    {
+      return 0;
+    }
+
+    current_length = strlen(current_path);
+    new_length = current_length + 1 + component_length;
+    if (new_length >= sizeof(current_path))
+    {
+      return 0;
+    }
+
+    current_path[current_length] = '/';
+    memcpy(current_path + current_length + 1, component_start, component_length);
+    current_path[new_length] = '\0';
+
+    created = 0;
+    status = ensure_directory_exists(current_path, &created);
+    if (status <= 0)
+    {
+      return 0;
+    }
+
+    if (created && created_count != NULL)
+    {
+      (*created_count)++;
+    }
+
+    if (created && enable_custom_icons)
+    {
+      num_drawer_icons_attempted++;
+      if (icon_applier_ensure_drawer_icon(current_path, &drawer_icon_options))
+      {
+        num_drawer_icons_applied++;
+      }
+      else
+      {
+        num_drawer_icons_failed++;
+      }
+    }
+
+    if (separator == NULL)
+    {
+      break;
+    }
+
+    component_start = separator + 1;
+  }
+
+  return 1;
+}
+
+/* ========================================================================== */
+/* SECTION: ICON HELPER LOGIC                                                 */
+/* ========================================================================== */
+
+BOOL icon_applier_exists(const char *path)
+{
+  BPTR lock;
+
+  if (path == NULL || path[0] == '\0')
+  {
+    return FALSE;
+  }
+
+  lock = Lock((CONST_STRPTR)path, ACCESS_READ);
+  if (lock == 0)
+  {
+    return FALSE;
+  }
+
+  UnLock(lock);
+  return TRUE;
+}
+
+void icon_applier_sanitize_path(char *path)
+{
+  size_t i;
+
+  if (path == NULL)
+  {
+    return;
+  }
+
+  sanitize_amiga_path(path);
+
+  for (i = 0; path[i] != '\0'; i++)
+  {
+    if (((unsigned char)path[i] < 32U) || strchr("*?#|<>\"{}", path[i]) != NULL)
+    {
+      path[i] = '_';
+    }
+  }
+
+  remove_trailing_slash(path);
+}
+
+const char *icon_applier_get_icons_dir(const icon_applier_options *options)
+{
+  if (options == NULL || options->icons_dir == NULL || options->icons_dir[0] == '\0')
+  {
+    return ICON_APPLIER_DEFAULT_ICONS_DIR;
+  }
+
+  return options->icons_dir;
+}
+
+BOOL icon_applier_ensure_drawer_icon(const char *dir_path, const icon_applier_options *options)
+{
+  size_t dir_path_length;
+  size_t icons_dir_length;
+  size_t leaf_name_length;
+  char info_path[ICON_APPLIER_MAX_PATH];
+  char source_icon_name[ICON_APPLIER_MAX_PATH];
+  const char *leaf_name;
+  const char *icons_dir;
+  const char *slash;
+  const char *colon;
+  struct DiskObject *diskobj;
+  static int icons_dir_checked = 0;
+  static BOOL icons_dir_exists = FALSE;
+
+  if (dir_path == NULL || options == NULL)
+  {
+    return FALSE;
+  }
+
+  dir_path_length = strlen(dir_path);
+  if (dir_path_length + 5 >= sizeof(info_path))
+  {
+    return FALSE;
+  }
+
+  strcpy(info_path, dir_path);
+  strcat(info_path, ".info");
+  icon_applier_sanitize_path(info_path);
+
+  /* Preserve existing icon files for drawers that already have one. */
+  if (icon_applier_exists(info_path))
+  {
+    return TRUE;
+  }
+
+  slash = strrchr(dir_path, '/');
+  if (slash != NULL)
+  {
+    leaf_name = slash + 1;
+  }
+  else
+  {
+    colon = strrchr(dir_path, ':');
+    leaf_name = (colon != NULL) ? (colon + 1) : dir_path;
+  }
+
+  if (leaf_name[0] == '\0')
+  {
+    return FALSE;
+  }
+
+  diskobj = NULL;
+  icons_dir = icon_applier_get_icons_dir(options);
+
+  if (options->use_custom_icons)
+  {
+    if (!icons_dir_checked)
+    {
+      icons_dir_exists = icon_applier_exists(icons_dir);
+      icons_dir_checked = 1;
+    }
+
+    if (icons_dir_exists)
+    {
+      icons_dir_length = strlen(icons_dir);
+      leaf_name_length = strlen(leaf_name);
+      if (icons_dir_length + leaf_name_length + 2 < sizeof(source_icon_name))
+      {
+        strcpy(source_icon_name, icons_dir);
+        strcat(source_icon_name, "/");
+        strcat(source_icon_name, leaf_name);
+        icon_applier_sanitize_path(source_icon_name);
+        diskobj = GetDiskObject((CONST_STRPTR)source_icon_name);
+      }
+    }
+  }
+
+  if (diskobj == NULL)
+  {
+    diskobj = GetDefDiskObject(WBDRAWER);
+    if (diskobj == NULL)
+    {
+      return FALSE;
+    }
+  }
+
+  if (!PutDiskObject((CONST_STRPTR)dir_path, diskobj))
+  {
+    FreeDiskObject(diskobj);
+    return FALSE;
+  }
+
+  FreeDiskObject(diskobj);
+  return TRUE;
+}
+
+/* ========================================================================== */
+/* SECTION: TEST-MODE LOGIC                                                   */
+/* ========================================================================== */
+
+int equals_ignore_case(const char *left, const char *right)
+{
+  unsigned char left_char;
+  unsigned char right_char;
+
+  if (left == NULL || right == NULL)
+  {
+    return 0;
+  }
+
+  while (*left != '\0' && *right != '\0')
+  {
+    left_char = (unsigned char)*left;
+    right_char = (unsigned char)*right;
+
+    if (toupper(left_char) != toupper(right_char))
+    {
+      return 0;
+    }
+
+    left++;
+    right++;
+  }
+
+  return (*left == '\0' && *right == '\0');
+}
+
+int starts_with_ignore_case(const char *text, const char *prefix)
+{
+  unsigned char text_char;
+  unsigned char prefix_char;
+
+  if (text == NULL || prefix == NULL)
+  {
+    return 0;
+  }
+
+  while (*prefix != '\0')
+  {
+    if (*text == '\0')
+    {
+      return 0;
+    }
+
+    text_char = (unsigned char)*text;
+    prefix_char = (unsigned char)*prefix;
+    if (toupper(text_char) != toupper(prefix_char))
+    {
+      return 0;
+    }
+
+    text++;
+    prefix++;
+  }
+
+  return 1;
+}
+
+int parse_output_level_argument(const char *argument, int *parsed_level)
+{
+  const char *value;
+
+  if (argument == NULL || parsed_level == NULL)
+  {
+    return 0;
+  }
+
+  if (starts_with_ignore_case(argument, "-output="))
+  {
+    value = argument + 8;
+  }
+  else
+  {
+    return 0;
+  }
+
+  if (equals_ignore_case(value, "script"))
+  {
+    *parsed_level = OUTPUT_MINIMAL;
+    return 1;
+  }
+  if (equals_ignore_case(value, "normal"))
+  {
+    *parsed_level = OUTPUT_NORMAL;
+    return 1;
+  }
+  if (equals_ignore_case(value, "verbose"))
+  {
+    *parsed_level = OUTPUT_VERBOSE;
+    return 1;
+  }
+
+  return -1;
+}
+
+const char *output_mode_to_text(int output_level)
+{
+  if (output_level == OUTPUT_MINIMAL)
+  {
+    return "SCRIPT";
+  }
+  if (output_level == OUTPUT_VERBOSE)
+  {
+    return "VERBOSE";
+  }
+  return "NORMAL";
+}
+
+void maybe_print_quiet_heartbeat(void)
+{
+  if (current_output_level != OUTPUT_MINIMAL && quiet_skips && (num_directories_scanned % QUIET_HEARTBEAT_INTERVAL) == 0)
+  {
+    printf("[quiet] Scan heartbeat: scanned \x1B[1m%d\x1B[0m entries, archives found \x1B[1m%d\x1B[0m\n",
+           num_directories_scanned,
+           num_lha_archives_found + num_lzx_archives_found);
+  }
+}
+
+int check_disk_space(STRPTR path, int min_space_mb)
+{
+  struct InfoData *info = AllocMem(sizeof(struct InfoData), MEMF_CLEAR);
+  BPTR lock = Lock(path, ACCESS_READ);
+  long free_space;
+  int result;
+
+  if (!info)
+    return -1; /* Allocation failed, can't check disk space */
+  if (!lock)
+  {
+    FreeMem(info, sizeof(struct InfoData));
+    return -2; /* Unable to lock the path, can't check disk space */
+  }
+
+  result = 0; /* Default to 0, meaning there's enough space */
+
+  if (Info(lock, info))
+  {
+    /* Convert available blocks to bytes and then to megabytes */
+    free_space = ((long)info->id_NumBlocks - (long)info->id_NumBlocksUsed) * (long)info->id_BytesPerBlock / 1024 / 1024;
+
+#ifdef DEBUG
+    printf("Free space: %ld\n", free_space);
+#endif
+
+    if (free_space < 0)
+    {
+      result = 0; /* Assume very large disk, so return 0 */
+    }
+    else if (free_space < min_space_mb)
+    {
+      result = -3; /* Not enough space */
+    }
+  }
+  else
+  {
+    result = -4; /* Info call failed */
+  }
+
+  UnLock(lock);
+  FreeMem(info, sizeof(struct InfoData));
+  return result;
+}
+
+/* ========================================================================== */
+/* SECTION: LOGGING AND SUMMARY OUTPUT                                        */
+/* ========================================================================== */
+
+/**
+ * @brief Logs an error message to the error message array.
+ *
+ * Copies the provided error message into the global error message array and increments the error count.
+ * Ensures the message is null-terminated and does not exceed the maximum allowed length.
+ *
+ * @param errorMessage The error message to log.
+ */
+void log_error(const char *errorMessage)
+{
+  if (error_count >= MAX_ERRORS)
+  {
+    return;
+  }
+
+  if (errorMessage == NULL)
+  {
+    error_messages_array[error_count][0] = '\0';
+  }
+  else
+  {
+    strncpy(error_messages_array[error_count], errorMessage, MAX_ERROR_LENGTH - 1);
+    error_messages_array[error_count][MAX_ERROR_LENGTH - 1] = '\0'; /* Ensure null-termination */
+  }
+  error_count++;
+}
+
+/**
+ * @brief Prints all logged error messages to the console.
+ *
+ * If any errors have been logged, prints them in a formatted list. Otherwise, prints a message indicating no errors.
+ */
+void print_errors()
+{
+  int i;
+  if (error_count > 0)
+  {
+    printf("\n\x1B[1mErrors encountered during execution:\x1B[0m\n");
+    for (i = 0; i < error_count; i++)
+    {
+      printf("\x1B[1mError:\x1B[0m %d: %s\n", i + 1, error_messages_array[i]);
+    }
+  }
+  else
+  {
+    printf("\nNo errors encountered.\n");
+  }
+}
+
+void append_log_line(const char *filename, const char *line)
+{
+  FILE *log_file;
+
+  if (filename == NULL || line == NULL || filename[0] == '\0')
+  {
+    return;
+  }
+
+  log_file = fopen(filename, "a");
+  if (log_file == NULL)
+  {
+    return;
+  }
+
+  fputs(line, log_file);
+  fputc('\n', log_file);
+  fflush(log_file);
+  fclose(log_file);
+}
+
+int build_timestamped_log_filename(const char *prefix, char *output_buffer, size_t output_buffer_size)
+{
+  time_t now;
+  struct tm *time_info;
+  char timestamp[32];
+  size_t needed;
+
+  if (prefix == NULL || output_buffer == NULL || output_buffer_size == 0)
+  {
+    return 0;
+  }
+
+  now = time(NULL);
+  time_info = localtime(&now);
+  if (time_info == NULL)
+  {
+    return 0;
+  }
+
+  strftime(timestamp, sizeof(timestamp), "%Y%m%d-%H%M%S", time_info);
+
+  needed = strlen(prefix) + strlen("-") + strlen(timestamp) + strlen(".txt") + 1;
+  if (needed > output_buffer_size)
+  {
+    return 0;
+  }
+
+  strcpy(output_buffer, prefix);
+  strcat(output_buffer, "-");
+  strcat(output_buffer, timestamp);
+  strcat(output_buffer, ".txt");
+
+  return 1;
+}
+
+int write_last_run_summary(long elapsed_seconds)
+{
+  BPTR summary_file;
+  time_t end_time;
+  long archives_skipped;
+
+  summary_file = Open((CONST_STRPTR)LAST_RUN_SUMMARY_FILENAME, MODE_NEWFILE);
+  if (summary_file == 0)
+  {
+    return 0;
+  }
+
+  end_time = time(NULL);
+  archives_skipped = (long)num_archives_skipped_dest_exists + (long)num_lzx_archives_skipped_test_unsupported;
+
+  if (!write_summary_line(summary_file, "source_path: %s\n", input_directory_path) ||
+      !write_summary_line(summary_file, "destination_path: %s\n", output_directory_path) ||
+      !write_summary_line(summary_file, "output_mode: %s\n", output_mode_to_text(current_output_level)) ||
+      !write_summary_line(summary_file, "archives_found_total: %d\n", num_lha_archives_found + num_lzx_archives_found) ||
+      !write_summary_line(summary_file, "archives_found_lha: %d\n", num_lha_archives_found) ||
+      !write_summary_line(summary_file, "archives_found_lzx: %d\n", num_lzx_archives_found) ||
+      !write_summary_line(summary_file, "archives_extracted: %d\n", num_archives_extracted) ||
+      !write_summary_line(summary_file, "archives_skipped: %ld\n", archives_skipped) ||
+      !write_summary_line(summary_file, "archives_failed: %d\n", error_count) ||
+      !write_summary_line(summary_file, "fallback_used: %d\n", num_path_prep_fallbacks) ||
+      !write_summary_line(summary_file, "start_time_epoch: %ld\n", start_time) ||
+      !write_summary_line(summary_file, "end_time_epoch: %ld\n", (long)end_time) ||
+      !write_summary_line(summary_file, "elapsed_seconds: %ld\n", elapsed_seconds) ||
+      !write_summary_line(summary_file, "result: %s\n", error_count > 0 ? "COMPLETED_WITH_ERRORS" : "OK"))
+  {
+    Close(summary_file);
+    return 0;
+  }
+
+  if (num_destination_conflicts > 0)
+  {
+    if (!write_summary_line(summary_file, "destination_conflicts: %d\n", num_destination_conflicts))
+    {
+      Close(summary_file);
+      return 0;
+    }
+  }
+
+  Close(summary_file);
+
+  return 1;
+}
+
+int write_summary_line(BPTR summary_file, const char *format, ...)
+{
+  char line_buffer[MAX_LOG_LINE_LENGTH];
+  int line_length;
+  va_list args;
+
+  if (summary_file == 0 || format == NULL)
+  {
+    return 0;
+  }
+
+  va_start(args, format);
+  line_length = vsprintf(line_buffer, format, args);
+  va_end(args);
+
+  if (line_length < 0)
+  {
+    return 0;
+  }
+
+  if (Write(summary_file, line_buffer, line_length) != line_length)
+  {
+    return 0;
+  }
+
+  return 1;
+}
+
+/* ========================================================================== */
+/* SECTION: MAIN SCAN/EXTRACT FLOW                                            */
+/* ========================================================================== */
+
+void get_directory_contents(STRPTR input_directory_path, STRPTR output_directory_path)
+{
+  BPTR dir_lock;
+  int folder_claimed_destinations_count;
+  int has_lha_destination_name;
+  int directories_created_for_archive;
+  int path_prepare_result;
+  size_t archive_filename_length;
+  int destination_path_state;
+  int destination_conflict_detected;
+  char *folder_claimed_destinations[MAX_TRACKED_DESTINATIONS];
+  char destination_claim_key[MAX_ERROR_LENGTH];
+  char file_extension[5];
+  char current_file_path[256];
+  char destination_drawer_path[256];
+  char lha_destination_name[256];
+  char archive_name_without_extension[256];
+  char ExtractCommand[20];
+  char ExtractTargetCommand[4];
+  char extraction_command[256];
+  char *relative_destination_path;
+  char *directoryName;
+  char program_name[16];
+  char fileCommandStore[256];
+  char fallback_debug_line[MAX_LOG_LINE_LENGTH];
+  LONG command_result;
+  char *file_path_tmp;
+  size_t needed;
+  size_t redirect_suffix_length;
+  int used_path_prep_fallback;
+  struct FileInfoBlock *file_info_block;
+
+  folder_claimed_destinations_count = 0;
+  reset_protection_bits = 1;
+
+  if (current_output_level != OUTPUT_MINIMAL)
+  {
+    printf("Scanning directory: %s\n", input_directory_path);
+  }
+
+  dir_lock = Lock((CONST_STRPTR)input_directory_path, ACCESS_READ);
+  if (dir_lock)
+  {
+    file_info_block = (struct FileInfoBlock *)AllocMem(sizeof(struct FileInfoBlock), MEMF_CLEAR);
+    if (file_info_block)
+    {
+      if (Examine(dir_lock, file_info_block))
+      {
+        while (ExNext(dir_lock, file_info_block) && should_stop_app == 0)
+        {
+          if (strcmp(file_info_block->fib_FileName, ".") != 0 && strcmp(file_info_block->fib_FileName, "..") != 0)
+          {
+            num_directories_scanned++;
+            maybe_print_quiet_heartbeat();
+
+            /* Safe construction of current_file_path */
+            needed = strlen(input_directory_path) + 1 + strlen(file_info_block->fib_FileName) + 1;
+            if (needed <= sizeof(current_file_path)) {
+                strcpy(current_file_path, input_directory_path);
+                strcat(current_file_path, "/");
+                strcat(current_file_path, file_info_block->fib_FileName);
+            } else {
+                printf("Error: Path too long for current_file_path buffer.\n");
+                log_error("Path too long for current_file_path buffer.");
+                continue;
+            }
+            sanitize_amiga_path(current_file_path);
+
+            if (file_info_block->fib_DirEntryType > 0)
+            {
+              num_directories_scanned++;
+              maybe_print_quiet_heartbeat();
+
+              get_directory_contents(current_file_path, output_directory_path);
+            }
+            else
+            {
+              if (get_file_extension(file_info_block->fib_FileName, file_extension) == NULL)
+              {
+                continue;
+              }
+
+              if (strcmp(file_extension, ".LHA") == 0 || strcmp(file_extension, ".LZX") == 0)
+              {
+                /* ------------------------------------------------------------ */
+                /* ARCHIVE-TYPE DETECTION AND COMMAND BUILDING                 */
+                /* ------------------------------------------------------------ */
+
+                file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
+                if (file_path_tmp) {
+                    needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1;
+                    if (needed <= sizeof(fileCommandStore)) {
+                        strcpy(fileCommandStore, output_directory_path);
+                        strcat(fileCommandStore, "/");
+                        strcat(fileCommandStore, file_path_tmp);
+                    } else {
+                        printf("Error: Path too long for fileCommandStore buffer.\n");
+                        log_error("Path too long for fileCommandStore buffer.");
+                        FreeVec(file_path_tmp);
+                        continue;
+                    }
+                } else {
+                    printf("Error: get_file_path returned NULL.\n");
+                    continue;
+                }
+                sanitize_amiga_path(fileCommandStore);
+
+                strcpy(archive_name_without_extension, file_info_block->fib_FileName);
+                archive_filename_length = strlen(archive_name_without_extension);
+                if (archive_filename_length > 4)
+                {
+                  archive_name_without_extension[archive_filename_length - 4] = '\0';
+                }
+
+                needed = strlen(fileCommandStore) + 1 + strlen(archive_name_without_extension) + 1;
+                if (needed > sizeof(destination_drawer_path))
+                {
+                  printf("Error: Path too long for destination_drawer_path buffer.\n");
+                  log_error("Path too long for destination_drawer_path buffer.");
+                  FreeVec(file_path_tmp);
+                  continue;
+                }
+                strcpy(destination_drawer_path, fileCommandStore);
+                strcat(destination_drawer_path, "/");
+                strcat(destination_drawer_path, archive_name_without_extension);
+                sanitize_amiga_path(destination_drawer_path);
+
+                has_lha_destination_name = 0;
+                lha_destination_name[0] = '\0';
+                if (strcmp(file_extension, ".LHA") == 0)
+                {
+                  sprintf(extraction_command, "c:lha vq \"%s\" >ram:listing.txt", current_file_path);
+                  sanitize_amiga_path(extraction_command);
+                  SystemTagList(extraction_command, NULL);
+                  directoryName = find_first_directory("ram:listing.txt");
+                  DeleteFile("ram:listing.txt");
+
+                  if (directoryName != NULL && directoryName[0] != '\0')
+                  {
+                    strncpy(lha_destination_name, directoryName, sizeof(lha_destination_name) - 1);
+                    lha_destination_name[sizeof(lha_destination_name) - 1] = '\0';
+                    has_lha_destination_name = 1;
+
+                    needed = strlen(fileCommandStore) + 1 + strlen(lha_destination_name) + 1;
+                    if (needed <= sizeof(destination_drawer_path))
+                    {
+                      strcpy(destination_drawer_path, fileCommandStore);
+                      strcat(destination_drawer_path, "/");
+                      strcat(destination_drawer_path, lha_destination_name);
+                      sanitize_amiga_path(destination_drawer_path);
+                    }
+                  }
+                }
+
+                if (has_lha_destination_name)
+                {
+                  strncpy(destination_claim_key, lha_destination_name, MAX_ERROR_LENGTH - 1);
+                }
+                else
+                {
+                  strncpy(destination_claim_key, archive_name_without_extension, MAX_ERROR_LENGTH - 1);
+                }
+                destination_claim_key[MAX_ERROR_LENGTH - 1] = '\0';
+
+                destination_conflict_detected = 0;
+                destination_path_state = get_path_state(destination_drawer_path);
+
+                /* ------------------------------------------------------------ */
+                /* DESTINATION RESOLUTION AND SKIP LOGIC                        */
+                /* ------------------------------------------------------------ */
+
+                if (destination_path_state == -1)
+                {
+                  printf("Conflict: destination path exists but is not a drawer: \x1B[1m%s\x1B[0m\n", destination_drawer_path);
+                  num_destination_conflicts++;
+                  num_destination_not_drawer_conflicts++;
+                  record_destination_conflict_sample(destination_drawer_path);
+                  destination_conflict_detected = 1;
+                }
+
+                if (is_destination_claimed(destination_claim_key, folder_claimed_destinations, folder_claimed_destinations_count))
+                {
+                  printf("Conflict: two archives map to the same destination drawer: \x1B[1m%s\x1B[0m\n", destination_drawer_path);
+                  num_destination_conflicts++;
+                  record_destination_conflict_sample(destination_drawer_path);
+                  destination_conflict_detected = 1;
+                }
+                else
+                {
+                  if (!add_claimed_destination(destination_claim_key, folder_claimed_destinations, &folder_claimed_destinations_count) && destination_tracking_overflow_warned == 0)
+                  {
+                    printf("Warning: destination conflict tracking limit reached. Further destination conflicts may not be detected.\n");
+                    destination_tracking_overflow_warned = 1;
+                  }
+                }
+
+                if (destination_conflict_detected)
+                {
+                  FreeVec(file_path_tmp);
+                  continue;
+                }
+
+                if (skip_if_dest_exists && !test_archives_only && destination_path_state == 1)
+                {
+                  relative_destination_path = remove_text(destination_drawer_path, output_directory_path);
+                  if (!quiet_skips && current_output_level != OUTPUT_MINIMAL)
+                  {
+                    printf("Skipping \x1B[1m%s\x1B[0m (already exists: \x1B[1m%s\x1B[0m)\n", file_info_block->fib_FileName, relative_destination_path);
+                  }
+                  num_archives_skipped_dest_exists++;
+                  FreeVec(file_path_tmp);
+                  continue;
+                }
+
+                if (current_output_level != OUTPUT_MINIMAL)
+                {
+                  if (test_archives_only)
+                  {
+                    if (!(strcmp(file_extension, ".LZX") == 0 && unlzx_is_216))
+                    {
+                      printf("Testing \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName);
+                    }
+                  }
+                  else
+                  {
+                    printf("Extracting \x1B[1m%s\x1B[0m to \x1B[1m%s\x1B[0m\n", file_info_block->fib_FileName, fileCommandStore);
+                  }
+                }
+                FreeVec(file_path_tmp);
+                if (strcmp(file_extension, ".LHA") == 0)
+                {
+                  num_lha_archives_found++;
+                  strcpy(ExtractTargetCommand, "  \0");
+                  strcpy(program_name, "lha");
+                  if (test_archives_only)
+                  {
+                    strcpy(ExtractCommand, "t\0");
+                  }
+                  else
+                  {
+                    if (current_output_level == OUTPUT_VERBOSE)
+                    {
+                      strcpy(ExtractCommand, "-T x\0");
+                    }
+                    else
+                    {
+                      strcpy(ExtractCommand, "-T -M -N -m x\0");
+                    }
+
+                    if (reset_protection_bits == 1)
+                    {
+                      sprintf(extraction_command, "c:lha vq \"%s\" >ram:listing.txt", current_file_path);
+                      sanitize_amiga_path(extraction_command);
+                      SystemTagList(extraction_command, NULL);
+                      directoryName = find_first_directory("ram:listing.txt");
+                      if (directoryName != NULL)
+                      {
+                        file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
+                        if (file_path_tmp) {
+                            needed = strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1 + strlen(directoryName) + 1;
+                            if (needed <= sizeof(fileCommandStore)) {
+                                strcpy(fileCommandStore, output_directory_path);
+                                strcat(fileCommandStore, "/");
+                                strcat(fileCommandStore, file_path_tmp);
+                                strcat(fileCommandStore, "/");
+                                strcat(fileCommandStore, directoryName);
+                            } else {
+                                printf("Error: Path too long for fileCommandStore buffer.\n");
+                                log_error("Path too long for fileCommandStore buffer.");
+                                FreeVec(file_path_tmp);
+                                continue;
+                            }
+                        } else {
+                            printf("Error: get_file_path returned NULL.\n");
+                            continue;
+                        }
+                        sanitize_amiga_path(fileCommandStore);
+
+                        if (does_folder_exists(fileCommandStore) == 1)
+                        {
+                          file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
+                          if (file_path_tmp) {
+                                needed = strlen("protect \"") + strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 1 + strlen(directoryName) + strlen("/#?\" all rwed >NIL:") + 1;
+                              if (needed <= sizeof(fileCommandStore)) {
+                                  strcpy(fileCommandStore, "protect \"");
+                                  strcat(fileCommandStore, output_directory_path);
+                                  strcat(fileCommandStore, "/");
+                                  strcat(fileCommandStore, file_path_tmp);
+                                  strcat(fileCommandStore, "/");
+                                  strcat(fileCommandStore, directoryName);
+                                  strcat(fileCommandStore, "/#?\" all rwed >NIL:");
+                              } else {
+                                  printf("Error: Path too long for fileCommandStore buffer (protect).\n");
+                                  log_error("Error: Path too long for extraction_command buffer.");
+                                  FreeVec(file_path_tmp);
+                                  continue;
+                              }
+                          } else {
+                              printf("Error: get_file_path returned NULL.\n");
+                              continue;
+                          }
+                          sanitize_amiga_path(fileCommandStore);
+
+                          if (current_output_level != OUTPUT_MINIMAL)
+                          {
+                            printf("Prepping any protected files for potential replacement...\n");
+                          }
+                          SystemTagList(fileCommandStore, NULL);
+
+                          FreeVec(file_path_tmp);
+                          file_path_tmp = NULL;
+                        }
+                        FreeVec(file_path_tmp);
+                      }
+                      else
+                      {
+                        printf("Unable to get the file path from the LHA output for file %s.\n", current_file_path);
+                      }
+                    }
+                    ExtractCommand[0] = '\0';
+                    if (current_output_level == OUTPUT_VERBOSE)
+                    {
+                      strcpy(ExtractCommand, "-T x\0");
+                    }
+                    else
+                    {
+                      strcpy(ExtractCommand, "-T -M -N -m x\0");
+                    }
+                  }
+                }
+                else
+                {
+                  num_lzx_archives_found++;
+
+                  if (test_archives_only && unlzx_is_216)
+                  {
+                    num_lzx_archives_skipped_test_unsupported++;
+                    if (!lzx_test_skip_notice_printed)
+                    {
+                      printf("UnLZX 2.16 does not support testing so LZX archives have been skipped.\n");
+                      lzx_test_skip_notice_printed = true;
+                    }
+                    continue;
+                  }
+
+                  strcpy(ExtractTargetCommand, lzx_extract_target_command);
+                  strcpy(program_name, "c:unlzx");
+                  if (test_archives_only)
+                  {
+                    strcpy(ExtractCommand, "t\0");
+                  }
+                  else
+                  {
+                    strcpy(ExtractCommand, lzx_extract_command);
+                  }
+                }
+
+                
+                /* Check for disk space before extracting */
+                should_stop_app = 0;
+                used_path_prep_fallback = 0;
+                if (skip_disk_space_check == false)
+                {
+                  int disk_check_result = check_disk_space(output_directory_path, 20);
+                  if (disk_check_result < 0)
+                  {
+                    /* To do: handle various error cases based
+                       on the result code */
+                    printf(
+                        "\x1B[1mError:\x1B[0m Not enough "
+                        "space on the target drive or cannot "
+                        "check space.\n20MB minimum checked "
+                        "for.  To disable this check, launch "
+                        "the program\nwithout the "
+                        "'-enablespacecheck' command.\n");
+                    should_stop_app = 1;
+                  }
+                }
+
+                if (should_stop_app == 0 && !test_archives_only)
+                {
+                  directories_created_for_archive = 0;
+                  path_prepare_result = ensure_path_directories(output_directory_path, destination_drawer_path, &directories_created_for_archive);
+                  if (!path_prepare_result)
+                  {
+                    printf(
+                        "\n\x1B[1mWarning:\x1B[0m "
+                        "Unable to prepare destination drawers "
+                        "for %s at %s\n"
+                        "Falling back to extractor-managed folder creation.\n",
+                        current_file_path,
+                        destination_drawer_path);
+
+                    used_path_prep_fallback = 1;
+                    num_path_prep_fallbacks++;
+
+                    if (debug_mode)
+                    {
+                      fallback_debug_line[0] = '\0';
+                      strncat(fallback_debug_line, "fallback=path-prep-failed | archive=", MAX_LOG_LINE_LENGTH - strlen(fallback_debug_line) - 1);
+                      strncat(fallback_debug_line, current_file_path, MAX_LOG_LINE_LENGTH - strlen(fallback_debug_line) - 1);
+                      strncat(fallback_debug_line, " | destination=", MAX_LOG_LINE_LENGTH - strlen(fallback_debug_line) - 1);
+                      strncat(fallback_debug_line, destination_drawer_path, MAX_LOG_LINE_LENGTH - strlen(fallback_debug_line) - 1);
+                      append_log_line(debug_log_filename, fallback_debug_line);
+                    }
+                  }
+                  else
+                  {
+                    num_directories_created += directories_created_for_archive;
+                  }
+                }
+
+                if (should_stop_app == 0)
+                {
+                  num_archives_found++;
+
+                  if (used_path_prep_fallback && debug_mode)
+                  {
+                    append_log_line(debug_log_filename, "fallback=extract-without-prepared-drawers");
+                  }
+
+                  /* ---------------------------------------------------------- */
+                  /* ARCHIVE-TYPE COMMAND EXECUTION                             */
+                  /* ---------------------------------------------------------- */
+
+                  /* Combine the extraction command, source
+                   * path, and output path */
+                  file_path_tmp = get_file_path(remove_text(current_file_path, input_file_path));
+                    redirect_suffix_length = (current_output_level == OUTPUT_MINIMAL) ? strlen(" >NIL:") : 0;
+                  if (file_path_tmp) {
+                      needed = strlen(program_name) + 1 + strlen(ExtractCommand) + 3 + strlen(current_file_path) + 3 + strlen(ExtractTargetCommand) + 3 + strlen(output_directory_path) + 1 + strlen(file_path_tmp) + 2 + redirect_suffix_length + 1;
+                      if (needed <= sizeof(extraction_command)) {
+                          strcpy(extraction_command, program_name);
+                          strcat(extraction_command, " ");
+                          strcat(extraction_command, ExtractCommand);
+                          strcat(extraction_command, " \"");
+                          strcat(extraction_command, current_file_path);
+                          strcat(extraction_command, "\" ");
+                          strcat(extraction_command, ExtractTargetCommand);
+                          strcat(extraction_command, " \"");
+                          strcat(extraction_command, output_directory_path);
+                          strcat(extraction_command, "/");
+                          strcat(extraction_command, file_path_tmp);
+                          strcat(extraction_command, "\"");
+                          if (current_output_level == OUTPUT_MINIMAL)
+                          {
+                            strcat(extraction_command, " >NIL:");
+                          }
+                      } else {
+                          printf("Error: Path too long for extraction_command buffer.\n");
+                          log_error("Error: Path too long for extraction_command buffer.");
+                          FreeVec(file_path_tmp);
+                          continue;
+                      }
+                  } else {
+                      printf("Error: get_file_path returned NULL.\n");
+                      continue;
+                  }
+                  sanitize_amiga_path(extraction_command);
+                  FreeVec(file_path_tmp);
+
+                  if (!test_archives_only)
+                  {
+                    if (current_output_level == OUTPUT_MINIMAL)
+                    {
+                      printf("Extracting: %s\n", file_info_block->fib_FileName);
+                    }
+                  }
+
+
+
+                  /* Execute the command*/
+                  command_result = SystemTagList(extraction_command, NULL);
+
+                  /* Check for error */
+                  if (command_result != 0)
+                  {
+                    if (test_archives_only && test_errors_log_enabled)
+                    {
+                      char test_error_line[MAX_LOG_LINE_LENGTH];
+
+                      test_error_line[0] = '\0';
+                      strncat(test_error_line, "archive=", MAX_LOG_LINE_LENGTH - strlen(test_error_line) - 1);
+                      strncat(test_error_line, current_file_path, MAX_LOG_LINE_LENGTH - strlen(test_error_line) - 1);
+                      strncat(test_error_line, " | rc=", MAX_LOG_LINE_LENGTH - strlen(test_error_line) - 1);
+                      sprintf(test_error_line + strlen(test_error_line), "%ld", command_result);
+
+                      append_log_line(test_errors_log_filename, test_error_line);
+                      test_errors_log_count++;
+                    }
+
+                    if (command_result == 10)
+                    {
+                      printf(
+                          "\n\x1B[1mError:\x1B[0m "
+                          "Corrupt archive %s\n",
+                          current_file_path);
+                      /* Copy the first part of the
+                         message */
+                      strncpy(single_error_message, current_file_path, MAX_ERROR_LENGTH - 1);
+                      single_error_message[MAX_ERROR_LENGTH - 1] = '\0'; /* Ensure null-termination */
+
+                      /* Concatenate the error message if there's space */
+                      if (strlen(single_error_message) + strlen(" is corrupt") < MAX_ERROR_LENGTH)
+                      {
+                        strcat(single_error_message, " is corrupt");
+                      }
+                      log_error(single_error_message);
+
+                      if (debug_mode)
+                      {
+                        char debug_line[MAX_LOG_LINE_LENGTH];
+
+                        debug_line[0] = '\0';
+                        strncat(debug_line, "archive=", MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+                        strncat(debug_line, current_file_path, MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+                        strncat(debug_line, " | rc=", MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+                        sprintf(debug_line + strlen(debug_line), "%ld", command_result);
+                        strncat(debug_line, " | cmd=", MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+                        strncat(debug_line, extraction_command, MAX_LOG_LINE_LENGTH - strlen(debug_line) - 1);
+
+                        append_log_line(debug_log_filename, debug_line);
+                      }
+                    }
+                    else
+                    {
+                      printf(
+                          "\n\x1B[1mError:\x1B[0m "
+                          "Failed to execute command "
+                          "lha for file %s.\nPlease "
+                          "check the archive is not "
+                          "damaged, and there is "
+                          "enough space in the\ntarget "
+                          "directory.\n",
+                          current_file_path);
+                      /* Copy the first part of the message */
+
+                      strncpy(single_error_message, current_file_path, MAX_ERROR_LENGTH - 1);
+                      single_error_message[MAX_ERROR_LENGTH - 1] = '\0'; /* Ensure null-termination
+
+                     /* Concatenate the error message if there's space */
+                      if (strlen(single_error_message) + strlen(" failed to extract. "
+                                                                "Unknown error") <
+                          MAX_ERROR_LENGTH)
+                      {
+                        strcat(single_error_message,
+                               " failed to extract. "
+                               "Unknown error");
+                      }
+                      log_error(single_error_message);
+                    }
+                  }
+                  else if (!test_archives_only)
+                  {
+                    num_archives_extracted++;
+
+                    if (skip_if_dest_exists && new_extract_log_enabled)
+                    {
+                      char new_extract_line[MAX_LOG_LINE_LENGTH];
+
+                      new_extract_line[0] = '\0';
+                      strncat(new_extract_line, "archive=", MAX_LOG_LINE_LENGTH - strlen(new_extract_line) - 1);
+                      strncat(new_extract_line, file_info_block->fib_FileName, MAX_LOG_LINE_LENGTH - strlen(new_extract_line) - 1);
+                      strncat(new_extract_line, " | destination=", MAX_LOG_LINE_LENGTH - strlen(new_extract_line) - 1);
+                      strncat(new_extract_line, destination_drawer_path, MAX_LOG_LINE_LENGTH - strlen(new_extract_line) - 1);
+
+                      append_log_line(new_extract_log_filename, new_extract_line);
+                      new_extract_log_count++;
+                    }
+                  }
+                  /* if the number of errors is greater then MAX_ERRORS, then quit */
+                  if (error_count >= MAX_ERRORS)
+                  {
+                    printf(
+                        "Maximum number of errors "
+                        "reached. Aborting.\n");
+                    should_stop_app = 1;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      FreeMem(file_info_block, sizeof(struct FileInfoBlock));
+    }
+    UnLock(dir_lock);
+  }
+
+  free_claimed_destinations(folder_claimed_destinations, folder_claimed_destinations_count);
+}
+
+/* ========================================================================== */
+/* SECTION: MAIN()                                                            */
+/* ========================================================================== */
+
+int main(int argc, char *argv[])
+{
+  int i, disk_check_result;
+  int output_parse_result;
+  int test_mode_requested_early;
+  int has_explicit_output_directory;
+  int second_arg_looks_like_option;
+  int pre_option_start_index;
+  int option_start_index;
+  long elapsed_seconds, hours, minutes, seconds;
+  char *versionInfo;
+
+  second_arg_looks_like_option = 0;
+  pre_option_start_index = 3;
+
+  if (argc >= 3)
+  {
+    if (argv[2][0] == '-')
+    {
+      second_arg_looks_like_option = 1;
+      pre_option_start_index = 2;
+    }
+  }
+
+  for (i = pre_option_start_index; i < argc; i++)
+  {
+    output_parse_result = parse_output_level_argument(argv[i], &current_output_level);
+    if (output_parse_result == 1)
+    {
+      continue;
+    }
+
+    if (strcmp(argv[i], "-writesummary") == 0)
+    {
+      write_summary_enabled = true;
+    }
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: startup banner and tool availability checks              */
+  /* ------------------------------------------------------------------------ */
+
+  /* Black text:  printf("\x1B[30m 30:\x1B[0m \n"); */
+  /* White text:  printf("\x1B[31m 31:\x1B[0m \n"); */
+  /* Blue text:   printf("\x1B[32m 32:\x1B[0m \n"); */
+  /* Grey text:   printf("\x1B[33m 33:\x1B[0m \n"); */
+
+    printf("\n");
+    printf("\x1B[1m\x1B[32m%s V%s\x1B[0m\x1B[0m  \n", PROGRAM_NAME, VERSION_STRING);
+
+  if (current_output_level != OUTPUT_MINIMAL)
+  {
+
+
+    printf(
+        "\x1B[32mThis program is designed to automatically locate LHA and LZX archive files\n"
+        "within nested subdirectories, extract their contents to a specified\n"
+        "destination, and preserve the original directory hierarchy in which the\n"
+        "archives were found. It also supports archive test-only mode, skipping\n"
+        "existing destinations, and script-friendly batch processing.\x1B[0m \n\n");
+  }
+
+if (!does_file_exist("c:lha"))
+{
+  printf(
+      "Required file c:lha was not found. This program depends on LHA "
+      "to test and extract supported archives, so it cannot continue. "
+      "Please install the latest version of lha.run from www.aminet.org\n");
+  return 0;
+}
+
+if (!does_file_exist("c:unlzx"))
+{
+  printf(
+      "Optional file c:unlzx was not found. A small number of WHDLoad "
+      "archives use LZX compression, so those archives will be skipped "
+      "until UnLZX is installed. All other supported archives will still "
+      "be processed normally. Please install the latest version of "
+      "lzx121r1.lha from www.aminet.org\n");
+}
+  else
+  {
+    versionInfo = get_executable_version("c:unlzx");
+    //printf("UnLZX version: %s", versionInfo);
+
+    if (versionInfo == NULL)
+    {
+      printf("Unable to detect UnLZX version. defaulting extraction command to \" e\"\n");
+      strcpy(lzx_extract_command, " e");
+      strcpy(lzx_extract_target_command, "  ");
+    }
+    else if (strcmp(versionInfo, "UnLZX 2.16") == 0)
+    {
+      strcpy(lzx_extract_command, "-x");
+      strcpy(lzx_extract_target_command, "-o");
+      unlzx_is_216 = true;
+      if (current_output_level != OUTPUT_MINIMAL)
+      {
+        printf("UnLZX version recognised as UnLZX 2.16.\n");
+      }
+    }
+    else if (strcmp(versionInfo, "LZX 1.21") == 0)
+    {
+      strcpy(lzx_extract_command, "-q -x e");
+      strcpy(lzx_extract_target_command, "  ");
+      unlzx_is_216 = false;
+      if (current_output_level != OUTPUT_MINIMAL)
+      {
+        printf("UnLZX version recognised as LZX 1.21 \n");
+      }
+    }
+    else
+    {
+      /* default to " e" for now */
+      strcpy(lzx_extract_command, " e");
+      printf("Unknown UnLZX version.  defaulting extraction command to %s\n", lzx_extract_command);
+    }
+
+    if (versionInfo != NULL)
+    {
+      FreeVec(versionInfo);
+    }
+  }
+  if (argc < 3)
+  {
+    printf(
+      "Usage:\n"
+      "  WHDArchiveExtractor <source_directory> <output_directory_path> [options]\n"
+      "  WHDArchiveExtractor <source_directory> -testarchivesonly [options]\n"
+      "\n"
+      "Options:\n"
+      "  -enablespacecheck             Check free space (20MB min) before each extract.\n"
+      "  -testarchivesonly             Test archives only; do not extract.\n"
+      "  -skipifdestexists             Skip archive if target drawer exists.\n"
+      "  -quietskips                   Hide skip lines; keep heartbeat.\n"
+      "  -enablecustomicons            Apply custom icons to new drawers.\n"
+      "  -debug                        Write timestamped debug log.\n"
+      "  -output=script|normal|verbose Set output level.\n"
+      "  -writesummary                 Save run summary file.\n\n");
+    return 1;
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: argument parsing                                         */
+  /* ------------------------------------------------------------------------ */
+
+  input_directory_path = argv[1];
+
+  test_mode_requested_early = 0;
+  for (i = 2; i < argc; i++)
+  {
+    if (strcmp(argv[i], "-testarchivesonly") == 0)
+    {
+      test_mode_requested_early = 1;
+      break;
+    }
+  }
+
+  has_explicit_output_directory = (argc >= 3 && !second_arg_looks_like_option);
+
+  if (has_explicit_output_directory)
+  {
+    output_directory_path = argv[2];
+  }
+  else if (test_mode_requested_early)
+  {
+    /* test-only source-only mode: destination path is not required */
+    output_directory_path = argv[1];
+  }
+  else
+  {
+    output_directory_path = argv[2];
+  }
+
+  option_start_index = has_explicit_output_directory ? 3 : 2;
+
+  skip_disk_space_check = true;
+  for (i = option_start_index; i < argc; i++)
+  {
+    if (strcmp(argv[i], "-enablespacecheck") == 0)
+    {
+      skip_disk_space_check = false;
+    }
+    if (strcmp(argv[i], "-testarchivesonly") == 0)
+    {
+      test_archives_only = true;
+    }
+    if (strcmp(argv[i], "-skipifdestexists") == 0)
+    {
+      skip_if_dest_exists = true;
+    }
+    if (strcmp(argv[i], "-enablecustomicons") == 0)
+    {
+      enable_custom_icons = true;
+    }
+    if (strcmp(argv[i], "-quietskips") == 0)
+    {
+      quiet_skips = true;
+    }
+    if (strcmp(argv[i], "-debug") == 0)
+    {
+      debug_mode = true;
+    }
+
+    output_parse_result = parse_output_level_argument(argv[i], &current_output_level);
+    if (output_parse_result == -1)
+    {
+      printf("Warning: invalid -output value '%s'. Valid values are script, normal, verbose.\n", argv[i]);
+    }
+
+    if (strcmp(argv[i], "-writesummary") == 0)
+    {
+      write_summary_enabled = true;
+    }
+  }
+
+  if (debug_mode)
+  {
+    if (build_timestamped_log_filename("error", debug_log_filename, sizeof(debug_log_filename)))
+    {
+      append_log_line(debug_log_filename, "debug logging enabled");
+    }
+    else
+    {
+      debug_mode = false;
+      printf("Warning: unable to create debug log filename; debug logging disabled.\n");
+    }
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: destination resolution, mode setup and preflight checks  */
+  /* ------------------------------------------------------------------------ */
+
+  if (skip_if_dest_exists && !test_archives_only)
+  {
+    if (build_timestamped_log_filename("New", new_extract_log_filename, sizeof(new_extract_log_filename)))
+    {
+      new_extract_log_enabled = 1;
+    }
+    else
+    {
+      new_extract_log_enabled = 0;
+      printf("Warning: unable to create New extraction log filename; New archive logging disabled.\n");
+    }
+  }
+
+  if (test_archives_only)
+  {
+    if (build_timestamped_log_filename("test_errors", test_errors_log_filename, sizeof(test_errors_log_filename)))
+    {
+      test_errors_log_enabled = 1;
+    }
+    else
+    {
+      test_errors_log_enabled = 0;
+      printf("Warning: unable to create test error log filename; test error logging disabled.\n");
+    }
+  }
+
+  drawer_icon_options.use_custom_icons = enable_custom_icons ? TRUE : FALSE;
+
+  remove_trailing_slash(input_directory_path);
+  remove_trailing_slash(output_directory_path);
+
+  input_file_path = input_directory_path;
+
+  if (current_output_level != OUTPUT_MINIMAL)
+  {
+    printf("\x1B[1mScanning directory:    \x1B[0m %s\n", input_directory_path);
+    printf("\x1B[1mExtracting archives to:\x1B[0m %s\n", output_directory_path);
+    if (enable_custom_icons)
+    {
+      printf("\x1B[1mCustom drawer icons:\x1B[0m enabled (source: %s)\n", drawer_icon_options.icons_dir);
+    }
+    else
+    {
+      printf("\x1B[1mCustom drawer icons:\x1B[0m disabled\n");
+    }
+    if (quiet_skips)
+    {
+      printf("\x1B[1mSkip logging:\x1B[0m quiet mode enabled (skip lines hidden, heartbeat every %d entries)\n", QUIET_HEARTBEAT_INTERVAL);
+    }
+    else
+    {
+      printf("\x1B[1mSkip logging:\x1B[0m normal\n");
+    }
+    if (debug_mode)
+    {
+      printf("\x1B[1mDebug logging:\x1B[0m enabled (%s)\n", debug_log_filename);
+    }
+    else
+    {
+      printf("\x1B[1mDebug logging:\x1B[0m disabled\n");
+    }
+    if (test_archives_only)
+    {
+      if (test_errors_log_enabled)
+      {
+        printf("\x1B[1mTest errors log:\x1B[0m enabled (%s)\n", test_errors_log_filename);
+      }
+      else
+      {
+        printf("\x1B[1mTest errors log:\x1B[0m disabled\n");
+      }
+    }
+    if (skip_if_dest_exists)
+    {
+      if (new_extract_log_enabled)
+      {
+        printf("\x1B[1mNew archive log:\x1B[0m enabled (%s)\n", new_extract_log_filename);
+      }
+      else if (!test_archives_only)
+      {
+        printf("\x1B[1mNew archive log:\x1B[0m disabled\n");
+      }
+    }
+  }
+
+  if (does_folder_exists(input_directory_path) == 0)
+  {
+    printf("\nUnable to find the source folder %s\n\n", input_directory_path);
+    return 0;
+  }
+  if (!test_archives_only && does_folder_exists(output_directory_path) == 0)
+  {
+    printf("\nUnable to find the target folder %s\n\n", output_directory_path);
+    return 0;
+  }
+
+  if (!skip_disk_space_check && !test_archives_only)
+  {
+    disk_check_result = check_disk_space(output_directory_path, 20);
+    if (disk_check_result < 0)
+    {
+      /* To do: handle various error cases based on the result code*/
+      printf(
+          "\n\x1B[1mError:\x1B[0m Not enough space on the target drive "
+          "or cannot check space.\n20MB minimum checked for.  To "
+          "disable this check, do not launch the\nprogram with the "
+          "\x1B[3m-enablespacecheck\x1B[23m command.\n\n");
+      return 0;
+    }
+  }
+
+  /* Start timer */
+  start_time = time(NULL);
+
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: run scan and extraction flow                             */
+  /* ------------------------------------------------------------------------ */
+
+  get_directory_contents(input_directory_path, output_directory_path);
+
+  /* Calculate elapsed time */
+  elapsed_seconds = time(NULL) - start_time;
+  hours = elapsed_seconds / 3600;
+  minutes = (elapsed_seconds % 3600) / 60;
+  seconds = elapsed_seconds % 60;
+
+  if (write_summary_enabled && !write_last_run_summary(elapsed_seconds))
+  {
+    printf("Warning: unable to write summary file %s\n", LAST_RUN_SUMMARY_FILENAME);
+  }
+
+  /* ------------------------------------------------------------------------ */
+  /* MAIN LIFECYCLE: logging and summary output                               */
+  /* ------------------------------------------------------------------------ */
+  printf("\n------------------------------------------\n\n");
+  printf(
+      "Scanned: \x1B[1m%d\x1B[0m dirs | Archives: \x1B[1m%d\x1B[0m (LHA \x1B[1m%d\x1B[0m, LZX \x1B[1m%d\x1B[0m)\n",
+      num_directories_scanned,
+      num_lha_archives_found + num_lzx_archives_found,
+      num_lha_archives_found,
+      num_lzx_archives_found);
+  printf(
+      "Extracted: \x1B[1m%d\x1B[0m | Skipped: \x1B[1m%d\x1B[0m | Conflicts: \x1B[1m%d\x1B[0m\n",
+      num_archives_extracted,
+      num_archives_skipped_dest_exists,
+      num_destination_conflicts);
+
+  if (num_destination_not_drawer_conflicts > 0)
+  {
+    printf(
+        "Conflicts where destination was not a drawer: \x1B[1m%d\x1B[0m\n",
+        num_destination_not_drawer_conflicts);
+  }
+
+  if (conflict_sample_count > 0)
+  {
+    int remaining_conflict_samples;
+
+    printf("Conflict sample: \x1B[1m%s\x1B[0m\n", destination_conflict_samples[0]);
+
+    remaining_conflict_samples = (conflict_sample_count - 1) + conflict_sample_omitted_count;
+    if (remaining_conflict_samples > 0)
+    {
+      printf("More conflict samples: \x1B[1m%d\x1B[0m\n", remaining_conflict_samples);
+    }
+  }
+
+  if (num_directories_created > 0)
+  {
+    printf(
+        "Created destination drawers during prep: \x1B[1m%d\x1B[0m\n",
+        num_directories_created);
+  }
+
+  if (num_path_prep_fallbacks > 0)
+  {
+    printf(
+        "Destination drawer prep fallback used: \x1B[1m%d\x1B[0m\n",
+        num_path_prep_fallbacks);
+  }
+
+  if (enable_custom_icons)
+  {
+    printf(
+        "Icons: tried \x1B[1m%d\x1B[0m, applied \x1B[1m%d\x1B[0m\n",
+        num_drawer_icons_attempted,
+        num_drawer_icons_applied);
+
+    if (num_drawer_icons_failed > 0)
+    {
+      printf(
+          "Drawer icon warnings (non-fatal): \x1B[1m%d\x1B[0m\n",
+          num_drawer_icons_failed);
+    }
+  }
+
+  if (num_lzx_archives_found > 0)
+  {
+    if (!does_file_exist("c:unlzx"))
+    {
+
+      printf(
+          "UnLZX is not installed.  \x1B[1m%d\x1B[0m LZX archives were found but not expanded.\n",
+          num_lzx_archives_found);
+    }
+  }
+
+  if (test_archives_only && num_lzx_archives_skipped_test_unsupported > 0)
+  {
+    printf("LZX archives skipped in test mode (UnLZX 2.16 limitation): \x1B[1m%d\x1B[0m\n", num_lzx_archives_skipped_test_unsupported);
+  }
+
+  if (quiet_skips)
+  {
+    printf("Note: quiet skips on (-quietskips)\n");
+  }
+
+  if (skip_if_dest_exists && new_extract_log_enabled)
+  {
+    if (new_extract_log_count > 0)
+    {
+      printf("New archives logged: \x1B[1m%d\x1B[0m (%s)\n", new_extract_log_count, new_extract_log_filename);
+    }
+    else
+    {
+      printf("New archives logged: \x1B[1m0\x1B[0m\n");
+    }
+  }
+
+  if (test_archives_only && test_errors_log_enabled && test_errors_log_count > 0)
+  {
+    printf("Test errors logged: \x1B[1m%d\x1B[0m (%s)\n", test_errors_log_count, test_errors_log_filename);
+  }
+
+  printf("Time: \x1B[1m%ld:%02ld:%02ld\x1B[0m | Errors: \x1B[1m%d\x1B[0m\n", hours, minutes, seconds, error_count);
+  if (error_count > 0)
+  {
+    print_errors();
+  }
+
+  if (test_archives_only && error_count == 0 && test_errors_log_count == 0)
+  {
+    printf("Archive test result: no damaged archives found.\n");
+  }
+
+  printf("\n%s V%s\n\n", PROGRAM_NAME, VERSION_STRING);
+  return 0;
+}
+
 
