@@ -1,6 +1,6 @@
 Short:        Automates extraction of WHDLoad archives
 Author:       Kerry Thompson
-Uploader:     kwezza@gmail.com
+Uploader:     
 Type:         util/arc
 Version:      2.0
 Requires:     util/arc/lha; util/arc/lzx121r1
